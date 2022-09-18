@@ -59,6 +59,7 @@ def setup_platform(
             HelenMeasurement(helen_api_client, credentials),
             HelenCostEstimate(helen_api_client, helen_price_client, credentials),
         ],
+        True
     )
 
 
@@ -175,9 +176,9 @@ class HelenCostEstimate(Entity):
         if not self._api_client.is_session_valid():
             self._api_client.login(**self.credentials)
 
+        self._contract_base_price = self._api_client.get_contract_base_price()
         self._state = self._calculate_current_month_price_estimate()
         self._last_month_cost = self._calculate_last_month_price()
-        self._contract_base_price = self._api_client.get_contract_base_price()
 
 
 class HelenMeasurement(Entity):

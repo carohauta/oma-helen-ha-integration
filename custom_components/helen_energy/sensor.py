@@ -23,7 +23,7 @@ from helenservice.price_client import HelenPriceClient, HelenContractType
 from helenservice.api_client import HelenApiClient
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(seconds=60)
+SCAN_INTERVAL = timedelta(hours=6)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {vol.Required(CONF_USERNAME): cv.string, vol.Required(CONF_PASSWORD): cv.string}

@@ -1,0 +1,17 @@
+{
+    "domain": "helen_energy",
+    "name": "Helen Energy Price",
+    "documentation": "https://www.home-assistant.io/integrations/helen_energy",
+    "requirements": [
+      "git+https://github.com/carohauta/oma-helen-cli.git@0.1.0#helenservice==0.1.0"
+    ],
+    "ssdp": [],
+    "zeroconf": [],
+    "homekit": {},
+    "dependencies": [],
+    "codeowners": [
+      "@carohauta"
+    ],
+    "iot_class": "cloud_polling",
+    "version": "1.0.0-SNAPSHOT"
+  }

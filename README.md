@@ -2,6 +2,8 @@
 
 [Home Assistant](https://www.home-assistant.io/) integration for [Oma Helen Python module](https://github.com/carohauta/oma-helen-cli). Periodically fetch your electricity consumption and estimated costs.
 
+Note that the integration currently works only for the `Helen Market Price Electricity` contract type.
+
 ### How to install
 
 Copy the `helen_energy/` folder into your HA `config/custom_components/` folder

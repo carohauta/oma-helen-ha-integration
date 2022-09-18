@@ -116,7 +116,7 @@ class HelenCostEstimate(Entity):
         super().__init__()
         self.credentials = credentials
         self.id = "measurement_cost_estimate"
-        self._name = "Helen energy cost estimate"
+        self._name = "Helen energy cost estimate so far"
         self._api_client = helen_api_client
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
@@ -165,6 +165,7 @@ class HelenCostEstimate(Entity):
         current_month_daily_average_consumption = (
             _get_average_daily_consumption_for_current_month(self._api_client)
         )
+        # the current estimate (so far) includes two extra average days because Oma Helen data usually lags behind a day or two
         current_month_cost_estimate = (
             self._contract_base_price
             + (current_month_price * current_month_consumption)

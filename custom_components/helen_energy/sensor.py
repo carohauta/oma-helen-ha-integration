@@ -3,7 +3,7 @@ import logging
 import math
 from typing import Any, Dict, Optional
 
-from helenservice.api_response import MeasurementResponse
+from .api_response import MeasurementResponse
 from homeassistant.core import HomeAssistant
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SCAN_INTERVAL
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, STATE_UNAVAILABLE
@@ -19,8 +19,8 @@ from homeassistant.components.sensor import PLATFORM_SCHEMA
 from .const import (
     DOMAIN,
 )
-from helenservice.price_client import HelenPriceClient, HelenContractType
-from helenservice.api_client import HelenApiClient
+from .price_client import HelenPriceClient, HelenContractType
+from .api_client import HelenApiClient
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=6)
@@ -30,7 +30,9 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 )
 
 STATE_ATTR_DAILY_AVERAGE_CONSUMPTION = "daily_average_consumption"
+STATE_ATTR_CURRENT_MONTH_CONSUMPTION = "current_month_consumption"
 STATE_ATTR_LAST_MONTH_CONSUMPTION = "last_month_consumption"
+STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT = "consumption_unit_of_measurement"
 STATE_ATTR_CONTRACT_BASE_PRICE = "contract_base_price"
 STATE_ATTR_LAST_MONTH_COST = "last_month_cost"
 
@@ -46,7 +48,6 @@ def setup_platform(
     password = config.get(CONF_PASSWORD)
 
     helen_api_client = HelenApiClient()
-    helen_api_client.login(username, password)
     helen_price_client = HelenPriceClient(HelenContractType.MARKET_PRICE)
 
     credentials = {"username": username, "password": password}
@@ -56,10 +57,9 @@ def setup_platform(
             HelenPrice(helen_price_client, "last_month"),
             HelenPrice(helen_price_client, "current_month"),
             HelenPrice(helen_price_client, "next_month"),
-            HelenMeasurement(helen_api_client, credentials),
             HelenCostEstimate(helen_api_client, helen_price_client, credentials),
         ],
-        True
+        True,
     )
 
 
@@ -106,6 +106,9 @@ class HelenCostEstimate(Entity):
     attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
     _contract_base_price = None
     _last_month_cost = None
+    _current_month_consumption = None
+    _average_daily_consumption = None
+    _last_month_measurement = None
 
     def __init__(
         self,
@@ -116,7 +119,7 @@ class HelenCostEstimate(Entity):
         super().__init__()
         self.credentials = credentials
         self.id = "measurement_cost_estimate"
-        self._name = "Helen energy cost estimate so far"
+        self._name = "Helen energy cost estimate"
         self._api_client = helen_api_client
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
@@ -145,6 +148,10 @@ class HelenCostEstimate(Entity):
         return {
             STATE_ATTR_CONTRACT_BASE_PRICE: self._contract_base_price,
             STATE_ATTR_LAST_MONTH_COST: self._last_month_cost,
+            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: self._current_month_consumption,
+            STATE_ATTR_LAST_MONTH_CONSUMPTION: self._last_month_measurement,
+            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: self._average_daily_consumption,
+            STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
         }
 
     def _calculate_last_month_price(self):
@@ -165,7 +172,6 @@ class HelenCostEstimate(Entity):
         current_month_daily_average_consumption = (
             _get_average_daily_consumption_for_current_month(self._api_client)
         )
-        # the current estimate (so far) includes two extra average days because Oma Helen data usually lags behind a day or two
         current_month_cost_estimate = (
             self._contract_base_price
             + (current_month_price * current_month_consumption)
@@ -180,61 +186,14 @@ class HelenCostEstimate(Entity):
         self._contract_base_price = self._api_client.get_contract_base_price()
         self._state = self._calculate_current_month_price_estimate()
         self._last_month_cost = self._calculate_last_month_price()
-
-
-class HelenMeasurement(Entity):
-    attrs: Dict[str, Any] = {"unit_of_measurement": "kWh", "icon": "mdi:lightning-bolt"}
-    _average_daily_consumption = None
-    _last_month_measurement = None
-
-    def __init__(
-        self,
-        helen_api_client: HelenApiClient,
-        credentials,
-    ):
-        super().__init__()
-        self.credentials = credentials
-        self.id = "consumption_this_month"
-        self._name = "Helen energy consumption"
-        self._api_client = helen_api_client
-        self._state = STATE_UNAVAILABLE
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self.id
-
-    @property
-    def state_attributes(self) -> Dict[str, Any]:
-        return self.attrs
-
-    @property
-    def name(self) -> str:
-        """Return the name of the entity."""
-        return self._name
-
-    @property
-    def state(self) -> Optional[str]:
-        return self._state
-
-    @property
-    def extra_state_attributes(self):
-        """Return the extra state attributes of the measurement."""
-        return {
-            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: self._average_daily_consumption,
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: self._last_month_measurement,
-        }
-
-    def update(self):
-        if not self._api_client.is_session_valid():
-            self._api_client.login(**self.credentials)
-
-        self._state = _get_total_consumption_for_current_month(self._api_client)
-        self._last_month_measurement = _get_total_consumption_for_last_month(
-            self._api_client
-        )
         self._average_daily_consumption = (
             _get_average_daily_consumption_for_current_month(self._api_client)
+        )
+        self._current_month_consumption = _get_total_consumption_for_current_month(
+            self._api_client
+        )
+        self._last_month_measurement = _get_total_consumption_for_last_month(
+            self._api_client
         )
 
 

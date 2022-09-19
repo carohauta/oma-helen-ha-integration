@@ -49,8 +49,9 @@ def setup_platform(
 
     helen_api_client = HelenApiClient()
     helen_price_client = HelenPriceClient(HelenContractType.MARKET_PRICE)
-
     credentials = {"username": username, "password": password}
+
+    # TODO: utilize DataUpdateCoordinator class and prefetch all data here, in setup
 
     add_entities(
         [
@@ -59,7 +60,7 @@ def setup_platform(
             HelenPrice(helen_price_client, "next_month"),
             HelenCostEstimate(helen_api_client, helen_price_client, credentials),
         ],
-        True,
+        True, # TODO: remove after utilizing DataUpdateCoordinator
     )
 
 

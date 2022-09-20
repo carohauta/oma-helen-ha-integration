@@ -181,8 +181,7 @@ class HelenCostEstimate(Entity):
         return math.ceil(current_month_cost_estimate)
 
     def update(self):
-        if not self._api_client.is_session_valid():
-            self._api_client.login(**self.credentials)
+        self._api_client.login(**self.credentials)
 
         self._contract_base_price = self._api_client.get_contract_base_price()
         self._state = self._calculate_current_month_price_estimate()
@@ -196,6 +195,8 @@ class HelenCostEstimate(Entity):
         self._last_month_measurement = _get_total_consumption_for_last_month(
             self._api_client
         )
+
+        self._api_client.close()
 
 
 class HelenPrice(Entity):

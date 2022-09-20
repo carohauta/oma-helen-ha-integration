@@ -16,7 +16,7 @@ from homeassistant.helpers.typing import (
 )
 import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from helenservice.const import (
+from .const import (
     DOMAIN,
 )
 from helenservice.price_client import HelenPriceClient, HelenContractType

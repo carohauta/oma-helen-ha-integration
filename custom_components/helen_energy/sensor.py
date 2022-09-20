@@ -3,7 +3,7 @@ import logging
 import math
 from typing import Any, Dict, Optional
 
-from .api_response import MeasurementResponse
+from helenservice.api_response import MeasurementResponse
 from homeassistant.core import HomeAssistant
 from homeassistant.components.sensor import PLATFORM_SCHEMA, SCAN_INTERVAL
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, STATE_UNAVAILABLE
@@ -16,11 +16,11 @@ from homeassistant.helpers.typing import (
 )
 import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from .const import (
+from helenservice.const import (
     DOMAIN,
 )
-from .price_client import HelenPriceClient, HelenContractType
-from .api_client import HelenApiClient
+from helenservice.price_client import HelenPriceClient, HelenContractType
+from helenservice.api_client import HelenApiClient
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=6)

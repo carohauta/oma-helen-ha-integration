@@ -99,7 +99,10 @@ def _get_average_daily_consumption_for_current_month(helen_api_client):
             ),
         )
     )
-    daily_average = sum(valid_measurements) / len(valid_measurements)
+    measurements_length = len(valid_measurements)
+    if measurements_length == 0: 
+        return 0
+    daily_average = sum(valid_measurements) / measurements_length
     return daily_average
 
 

@@ -3,7 +3,7 @@
     "name": "Helen Energy Price",
     "documentation": "https://github.com/carohauta/oma-helen-ha-integration",
     "requirements": [
-      "git+https://github.com/carohauta/oma-helen-cli.git@0.1.0#helenservice==0.1.0"
+      "git+https://github.com/carohauta/oma-helen-cli.git@1.0.0#oma-helen-cli==1.0.0"
     ],
     "ssdp": [],
     "zeroconf": [],

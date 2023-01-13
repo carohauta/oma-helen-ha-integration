@@ -18,7 +18,7 @@ Login to your HA with SSH
 ```shell
 cd custom_components # create this folder if it does not exists
 git clone https://github.com/carohauta/oma-helen-ha-integration omahelen
-mv omahelen/custom_components/helen_energy/* helen_energy/
+mv omahelen/custom_components/helen_energy/ .
 ```
 2. Add your Oma Helen credentials to the `secrets.yaml`
 ```yaml

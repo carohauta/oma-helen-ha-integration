@@ -23,7 +23,7 @@ from helenservice.api_client import HelenApiClient
 from helenservice.utils import get_month_date_range_by_date
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(hours=2)
+SCAN_INTERVAL = timedelta(hours=6)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {

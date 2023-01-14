@@ -34,16 +34,25 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     }
 )
 
+# common for all contract types
 STATE_ATTR_DAILY_AVERAGE_CONSUMPTION = "daily_average_consumption"
 STATE_ATTR_CURRENT_MONTH_CONSUMPTION = "current_month_consumption"
 STATE_ATTR_LAST_MONTH_CONSUMPTION = "last_month_consumption"
 STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT = "consumption_unit_of_measurement"
 STATE_ATTR_CONTRACT_BASE_PRICE = "contract_base_price"
-STATE_ATTR_LAST_MONTH_COST = "last_month_cost"
-STATE_ATTR_LAST_MONTH_TOTAL_COST = "last_month_total_cost"
-STATE_ATTR_CURRENT_MONTH_TOTAL_COST = "current_month_total_cost"
+
+# exchange
 STATE_ATTR_LAST_MONTH_PRICE_WITH_IMPACT = "last_month_price_with_impact"
 STATE_ATTR_CURRENT_MONTH_PRICE_WITH_IMPACT = "current_month_price_with_impact"
+
+# exchange and market price
+STATE_ATTR_LAST_MONTH_TOTAL_COST = "last_month_total_cost"
+STATE_ATTR_CURRENT_MONTH_TOTAL_COST = "current_month_total_cost"
+
+# market price
+STATE_ATTR_PRICE_LAST_MONTH = "price_last_month"
+STATE_ATTR_PRICE_CURRENT_MONTH = "price_current_month"
+STATE_ATTR_PRICE_NEXT_MONTH = "price_next_month"
 
 
 def setup_platform(
@@ -69,21 +78,18 @@ def setup_platform(
     entities = []
 
     if contract_type == "MARKET":
-        entities.append(HelenMarketPrice(helen_price_client, "last_month"))
-        entities.append(HelenMarketPrice(helen_price_client, "current_month"))
-        entities.append(HelenMarketPrice(helen_price_client, "next_month"))
         entities.append(
-            HelenMarketPriceCostEstimate(
+            HelenMarketPriceElectricity(
                 helen_api_client, helen_price_client, credentials
             )
         )
     elif contract_type == "EXCHANGE":
         entities.append(
-            HelenExchangeCosts(helen_api_client, helen_price_client, credentials)
+            HelenExchangeElectricity(helen_api_client, helen_price_client, credentials)
         )
     elif contract_type == "SMART_GUARANTEE":
         entities.append(
-            HelenSmartGuaranteeCosts(helen_api_client, helen_price_client, credentials)
+            HelenSmartGuarantee(helen_api_client, helen_price_client, credentials)
         )
 
     add_entities(
@@ -144,13 +150,17 @@ def _get_average_daily_consumption_for_current_month(helen_api_client: HelenApiC
     return daily_average
 
 
-class HelenMarketPriceCostEstimate(Entity):
+class HelenMarketPriceElectricity(Entity):
     attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
     _contract_base_price = None
-    _last_month_cost = None
+    _prices = None
+    _last_month_total_cost = None
+    _last_month_consumption = None
     _current_month_consumption = None
     _average_daily_consumption = None
-    _last_month_measurement = None
+    _price_last_month = None
+    _price_current_month = None
+    _price_next_month = None
 
     def __init__(
         self,
@@ -160,8 +170,8 @@ class HelenMarketPriceCostEstimate(Entity):
     ):
         super().__init__()
         self.credentials = credentials
-        self.id = "measurement_cost_estimate"
-        self._name = "Helen energy cost estimate"
+        self.id = "market_price_electricity_calculations"
+        self._name = "Helen Market Price Electricity"
         self._api_client = helen_api_client
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
@@ -189,16 +199,18 @@ class HelenMarketPriceCostEstimate(Entity):
         """Return the extra state attributes of the measurement."""
         return {
             STATE_ATTR_CONTRACT_BASE_PRICE: self._contract_base_price,
-            STATE_ATTR_LAST_MONTH_COST: self._last_month_cost,
+            STATE_ATTR_LAST_MONTH_TOTAL_COST: self._last_month_total_cost,
             STATE_ATTR_CURRENT_MONTH_CONSUMPTION: self._current_month_consumption,
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: self._last_month_measurement,
+            STATE_ATTR_LAST_MONTH_CONSUMPTION: self._last_month_consumption,
             STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: self._average_daily_consumption,
+            STATE_ATTR_PRICE_LAST_MONTH: self._price_last_month,
+            STATE_ATTR_PRICE_CURRENT_MONTH: self._price_current_month,
+            STATE_ATTR_PRICE_NEXT_MONTH: self._price_next_month,
             STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
         }
 
     def _calculate_last_month_price(self):
-        prices = self._price_client.get_electricity_prices()
-        last_month_price = getattr(prices, "last_month") / 100
+        last_month_price = getattr(self._prices, "last_month") / 100
         last_month_consumption = _get_total_consumption_for_last_month(self._api_client)
         last_month_cost = (
             last_month_price * last_month_consumption + self._contract_base_price
@@ -206,8 +218,7 @@ class HelenMarketPriceCostEstimate(Entity):
         return last_month_cost
 
     def _calculate_current_month_price_estimate(self):
-        prices = self._price_client.get_electricity_prices()
-        current_month_price = getattr(prices, "current_month") / 100
+        current_month_price = getattr(self._prices, "current_month") / 100
         current_month_consumption = _get_total_consumption_for_current_month(
             self._api_client
         )
@@ -223,57 +234,26 @@ class HelenMarketPriceCostEstimate(Entity):
 
     def update(self):
         self._api_client.login(**self.credentials)
-
+        self._prices = self._price_client.get_market_price_prices()
+        self._price_last_month = getattr(self._prices, "last_month")
+        self._price_current_month = getattr(self._prices, "current_month")
+        self._price_next_month = getattr(self._prices, "next_month")
         self._contract_base_price = self._api_client.get_contract_base_price()
         self._state = self._calculate_current_month_price_estimate()
-        self._last_month_cost = self._calculate_last_month_price()
+        self._last_month_total_cost = self._calculate_last_month_price()
         self._average_daily_consumption = (
             _get_average_daily_consumption_for_current_month(self._api_client)
         )
         self._current_month_consumption = _get_total_consumption_for_current_month(
             self._api_client
         )
-        self._last_month_measurement = _get_total_consumption_for_last_month(
+        self._last_month_consumption = _get_total_consumption_for_last_month(
             self._api_client
         )
         self._api_client.close()
 
 
-class HelenMarketPrice(Entity):
-    attrs: Dict[str, Any] = {"unit_of_measurement": "c/kWh", "icon": "mdi:currency-eur"}
-
-    def __init__(self, helen_price_client: HelenPriceClient, key: str):
-        super().__init__()
-        self.key = key
-        self.id = "price_" + key
-        self._name = "Helen energy price " + key.replace("_", " ")
-        self._price_client = helen_price_client
-        self._state = STATE_UNAVAILABLE
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self.id
-
-    @property
-    def state_attributes(self) -> Dict[str, Any]:
-        return self.attrs
-
-    @property
-    def name(self) -> str:
-        """Return the name of the entity."""
-        return self._name
-
-    @property
-    def state(self) -> Optional[str]:
-        return self._state
-
-    def update(self):
-        prices = self._price_client.get_market_price_prices()
-        self._state = getattr(prices, self.key)
-
-
-class HelenExchangeCosts(Entity):
+class HelenExchangeElectricity(Entity):
     attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
     _contract_base_price = None
     _last_month_total_cost = None
@@ -290,7 +270,7 @@ class HelenExchangeCosts(Entity):
         super().__init__()
         self.credentials = credentials
         self.id = "exchange_electricity_calculations"
-        self._name = "Helen Exchange energy cost calculations"
+        self._name = "Helen Exchange Electricity"
         self._api_client = helen_api_client
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
@@ -357,7 +337,7 @@ class HelenExchangeCosts(Entity):
         self._api_client.close()
 
 
-class HelenSmartGuaranteeCosts(Entity):
+class HelenSmartGuarantee(Entity):
     attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
     _contract_base_price = None
     _last_month_consumption = None
@@ -374,7 +354,7 @@ class HelenSmartGuaranteeCosts(Entity):
         super().__init__()
         self.credentials = credentials
         self.id = "smart_guarantee_electricity_calculations"
-        self._name = "Helen Smart Guarantee energy cost calculations"
+        self._name = "Helen Smart Guarantee"
         self._api_client = helen_api_client
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE

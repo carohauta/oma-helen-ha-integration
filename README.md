@@ -75,31 +75,31 @@ sensor:
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_exchange_energy_cost_calculations', 'current_month_consumption') | round() }}
+          {{ state_attr('sensor.helen_exchange_electricity', 'current_month_consumption') | round() }}
       helen_exchange_energy_consumption_last_month:
         friendly_name: "Last month energy consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_exchange_energy_cost_calculations', 'last_month_consumption') | round() }}
+          {{ state_attr('sensor.helen_exchange_electricity', 'last_month_consumption') | round() }}
       helen_exchange_energy_last_month_total_cost:
         friendly_name: "Last month energy cost"
         unit_of_measurement: "e"
         icon_template: mdi:currency-eur
         value_template: >
-            {{ state_attr('sensor.helen_exchange_energy_cost_calculations', 'last_month_total_cost') | round() }}
+            {{ state_attr('sensor.helen_exchange_electricity', 'last_month_total_cost') | round() }}
       helen_exchange_energy_price_current_month:
         friendly_name: "This month energy price"
         unit_of_measurement: "c/kWh"
         icon_template: mdi:currency-eur
         value_template: >
-          {{ (state_attr('sensor.helen_exchange_energy_cost_calculations', 'current_month_price_with_impact') * 100) | round(4) }}
+          {{ (state_attr('sensor.helen_exchange_electricity', 'current_month_price_with_impact') * 100) | round(4) }}
       helen_exchange_energy_daily_average_consumption:
         friendly_name: "Daily average consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_exchange_energy_cost_calculations', 'daily_average_consumption') | round() }}
+          {{ state_attr('sensor.helen_exchange_electricity', 'daily_average_consumption') | round() }}
 
 ```
 
@@ -112,7 +112,7 @@ cards:
   - type: horizontal-stack
     cards:
       - type: entity
-        entity: sensor.helen_exchange_energy_cost_calculations
+        entity: sensor.helen_exchange_electricity
         name: This month est.
         unit: EUR
         icon: None
@@ -149,25 +149,25 @@ sensor:
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_smart_guarantee_energy_cost_calculations', 'current_month_consumption') | round() }}
+          {{ state_attr('sensor.helen_smart_guarantee', 'current_month_consumption') | round() }}
       helen_smart_guarantee_energy_consumption_last_month:
         friendly_name: "Last month energy consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_smart_guarantee_energy_cost_calculations', 'last_month_consumption') | round() }}
+          {{ state_attr('sensor.helen_smart_guarantee', 'last_month_consumption') | round() }}
       helen_smart_guarantee_energy_price_current_month:
         friendly_name: "This month energy price"
         unit_of_measurement: "c/kWh"
         icon_template: mdi:currency-eur
         value_template: >
-          {{ (state_attr('sensor.helen_smart_guarantee_energy_cost_calculations', 'current_month_price_with_impact') * 100) | round(4) }}
+          {{ (state_attr('sensor.helen_smart_guarantee', 'current_month_price_with_impact') * 100) | round(4) }}
       helen_smart_guarantee_energy_daily_average_consumption:
         friendly_name: "Daily average consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_smart_guarantee_energy_cost_calculations', 'daily_average_consumption') | round() }}
+          {{ state_attr('sensor.helen_smart_guarantee', 'daily_average_consumption') | round() }}
 
 ```
 
@@ -180,7 +180,7 @@ cards:
   - type: horizontal-stack
     cards:
       - type: entity
-        entity: sensor.helen_smart_guarantee_energy_cost_calculations
+        entity: sensor.helen_smart_guarantee
         name: This month est.
         unit: EUR
         icon: None

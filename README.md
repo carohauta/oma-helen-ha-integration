@@ -45,7 +45,7 @@ sensor:
 
 4. Restart HA
 
-### How to interprete the entitites
+### How to interpret the entitites
 
 Depending on your contract type you will see one of the following new entities:
 - sensor.helen_exchange_electricity

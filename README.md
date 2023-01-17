@@ -64,8 +64,8 @@ Template sensors:
 ```yml
 sensor:
   - platform: helen_energy
-    username: !secret some_username
-    password: !secret some_password
+    username: !secret oma_helen_username
+    password: !secret oma_helen_password
     vat: 0.1
     contract_type: EXCHANGE
   - platform: template
@@ -88,12 +88,6 @@ sensor:
         icon_template: mdi:currency-eur
         value_template: >
             {{ state_attr('sensor.helen_exchange_electricity', 'last_month_total_cost') | round() }}
-      helen_exchange_energy_price_current_month:
-        friendly_name: "This month energy price"
-        unit_of_measurement: "c/kWh"
-        icon_template: mdi:currency-eur
-        value_template: >
-          {{ (state_attr('sensor.helen_exchange_electricity', 'current_month_price_with_impact') * 100) | round(4) }}
       helen_exchange_energy_daily_average_consumption:
         friendly_name: "Daily average consumption"
         unit_of_measurement: "kWh"
@@ -129,6 +123,13 @@ cards:
       - type: entity
         entity: sensor.helen_exchange_energy_consumption_last_month
         name: Last month
+  - type: horizontal-stack
+    cards:
+      - type: markdown
+        content: ' '
+      - type: entity
+        entity: sensor.helen_exchange_energy_daily_average_consumption
+        name: Daily average
 
 ```
 
@@ -138,8 +139,8 @@ Template sensors:
 ```yml
 sensor:
   - platform: helen_energy
-    username: !secret some_username
-    password: !secret some_password
+    username: !secret oma_helen_username
+    password: !secret oma_helen_password
     vat: 0.1
     contract_type: SMART_GUARANTEE
   - platform: template
@@ -161,7 +162,7 @@ sensor:
         unit_of_measurement: "c/kWh"
         icon_template: mdi:currency-eur
         value_template: >
-          {{ (state_attr('sensor.helen_smart_guarantee', 'current_month_price_with_impact') * 100) | round(4) }}
+          {{ (state_attr('sensor.helen_smart_guarantee', 'current_month_price_with_impact') * 100) | round(2) }}
       helen_smart_guarantee_energy_daily_average_consumption:
         friendly_name: "Daily average consumption"
         unit_of_measurement: "kWh"
@@ -212,8 +213,8 @@ Template sensors:
 ```yml
 sensor:
   - platform: helen_energy
-    username: !secret some_username
-    password: !secret some_password
+    username: !secret oma_helen_username
+    password: !secret oma_helen_password
     vat: 0.1
     contract_type: MARKET
   - platform: template

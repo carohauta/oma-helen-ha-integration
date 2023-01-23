@@ -11,6 +11,8 @@ The integration works for the following contract types:
 
 ### How to install
 
+Requires HA Core version 2022.7.0 or newer
+
 Copy the `helen_energy/` folder into your HA `config/custom_components/` folder
 
 #### Step-by-step manual installation

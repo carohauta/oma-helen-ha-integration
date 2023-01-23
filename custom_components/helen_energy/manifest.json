@@ -1,17 +1,14 @@
 {
-    "domain": "helen_energy",
-    "name": "Helen Energy Price",
-    "documentation": "https://github.com/carohauta/oma-helen-ha-integration",
-    "requirements": [
-      "oma-helen-cli==1.0.0"
-    ],
-    "ssdp": [],
-    "zeroconf": [],
-    "homekit": {},
-    "dependencies": [],
-    "codeowners": [
-      "@carohauta"
-    ],
-    "iot_class": "cloud_polling",
-    "version": "1.0.0"
-  }
+  "domain": "helen_energy",
+  "name": "Helen Energy Price",
+  "version": "1.0.0",
+  "documentation": "https://github.com/carohauta/oma-helen-ha-integration",
+  "issue_tracker": "https://github.com/carohauta/oma-helen-ha-integration/issues",
+  "requirements": [
+    "oma-helen-cli==1.0.0"
+  ],
+  "codeowners": [
+    "@carohauta"
+  ],
+  "iot_class": "cloud_polling"
+}

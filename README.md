@@ -15,13 +15,18 @@ The integration works for the following contract types:
 
 Requires HA Core version 2022.7.0 or newer
 
-Copy the `helen_energy/` folder into your HA `config/custom_components/` folder
+Install as [HACS custom repository](https://hacs.xyz/docs/faq/custom_repositories)
+OR
+Copy the `helen_energy/` folder into your HA `config/custom_components/`
 
 #### Step-by-step manual installation
 
 Login to your HA with SSH
 
 1. Go to the HA configuration root folder, which is the same folder where your `configuration.yaml` is located. Run the following commands
+
+💡 Tip: step #1 can be skipped if you installed the integration as HACS custom repository
+
 ```shell
 cd custom_components # create this folder if it does not exists
 git clone https://github.com/carohauta/oma-helen-ha-integration omahelen

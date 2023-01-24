@@ -104,6 +104,7 @@ def _get_total_consumption_between_dates(
     measurement_response: MeasurementResponse = (
         helen_api_client.get_daily_measurements_between_dates(start_date, end_date)
     )
+    if not measurement_response.intervals.electricity: return 0.0
     total = sum(
         list(
             map(
@@ -134,6 +135,7 @@ def _get_average_daily_consumption_for_current_month(helen_api_client: HelenApiC
     measurement_response: MeasurementResponse = (
         helen_api_client.get_daily_measurements_between_dates(start_date, end_date)
     )
+    if not measurement_response.intervals.electricity: return 0
     valid_measurements = list(
         map(
             lambda m: m.value,

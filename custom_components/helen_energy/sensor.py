@@ -232,7 +232,7 @@ class HelenMarketPriceElectricity(Entity):
         return last_month_cost
 
     def _calculate_current_month_price_estimate(self):
-        current_month_price = self._default_unit_price if self._default_unit_price is not None else getattr(self._prices, "current_month") / 100
+        current_month_price = self._default_unit_price / 100 if self._default_unit_price is not None else getattr(self._prices, "current_month") / 100
         current_month_consumption = _get_total_consumption_for_current_month(
             self._api_client
         )

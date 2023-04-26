@@ -293,7 +293,6 @@ class HelenExchangeElectricity(Entity):
         helen_price_client: HelenPriceClient,
         credentials,
         default_base_price,
-        default_unit_price,
     ):
         super().__init__()
         self.credentials = credentials

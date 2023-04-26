@@ -89,8 +89,10 @@ def setup_platform(
             )
         )
     elif contract_type == "EXCHANGE":
+        if default_unit_price is not None:
+            _LOGGER.warn("Default unit price has been set but it will not be used with EXCHANGE contract type.")
         entities.append(
-            HelenExchangeElectricity(helen_api_client, helen_price_client, credentials, default_base_price, default_unit_price)
+            HelenExchangeElectricity(helen_api_client, helen_price_client, credentials, default_base_price)
         )
     elif contract_type == "SMART_GUARANTEE":
         entities.append(
@@ -301,7 +303,6 @@ class HelenExchangeElectricity(Entity):
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
         self._default_base_price = default_base_price 
-        self._default_unit_price = default_unit_price
 
     @property
     def unique_id(self) -> str:
@@ -349,7 +350,18 @@ class HelenExchangeElectricity(Entity):
                 *get_month_date_range_by_date(last_month)
             )
         )
-        self._contract_base_price = self._api_client.get_contract_base_price()
+
+        try: 
+            fetched_base_price = self._api_client.get_contract_base_price()
+            self._contract_base_price = fetched_base_price
+            self._latest_base_price = fetched_base_price # save the latest value
+        except InvalidApiResponseException:
+            _LOGGER.error("Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't")
+            self._contract_base_price = self._latest_base_price if self._latest_base_price is not None else 0
+
+        if self._default_base_price is not None:
+            _LOGGER.info(f"Using the default base price: {self._default_base_price}")
+            self._contract_base_price = self._default_base_price
 
         self._state = current_month_total_cost + self._contract_base_price
         self._last_month_total_cost = last_month_total_cost + self._contract_base_price
@@ -437,8 +449,34 @@ class HelenSmartGuarantee(Entity):
         current_month_impact = self._api_client.calculate_impact_of_usage_between_dates(
             *get_month_date_range_by_date(current_month)
         )
+
+        try: 
+            fetched_base_price = self._api_client.get_contract_base_price()
+            self._contract_base_price = fetched_base_price
+            self._latest_base_price = fetched_base_price # save the latest value
+        except InvalidApiResponseException:
+            _LOGGER.error("Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't")
+            self._contract_base_price = self._latest_base_price if self._latest_base_price is not None else 0
+
+        if self._default_base_price is not None:
+            _LOGGER.info(f"Using the default base price: {self._default_base_price}")
+            self._contract_base_price = self._default_base_price
+
+        unit_price = 0
+
+        try: 
+            unit_price = self._api_client.get_contract_energy_unit_price()
+            self._latest_unit_price = unit_price # save the latest value
+        except InvalidApiResponseException:
+            _LOGGER.error("Received invalid response from Helen API when fetching energy unti price - using the latest value if it exists, or 0 if it doesn't")
+            unit_price = self._latest_unit_price if self._latest_unit_price is not None else 0
+
+        if self._default_unit_price is not None:
+            _LOGGER.info(f"Using the default energy unit price: {self._default_unit_price}")
+            unit_price = self._default_unit_price
+
         current_month_energy_price_with_impact = (
-            self._api_client.get_contract_energy_unit_price() + current_month_impact
+            unit_price + current_month_impact
         ) / 100
         self._current_month_energy_price_with_impact = (
             current_month_energy_price_with_impact

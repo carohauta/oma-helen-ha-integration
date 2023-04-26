@@ -54,7 +54,7 @@ sensor:
   - SMART_GUARANTEE
   - MARKET
 - `default_base_price` optional value if you want to set a fixed base price for your contract – if not set, the base price will be automatically fetched
-- `default_unit_price` optional value if you want to set a fixed unit price for your energy – if not set, the unit price will be automatically fetched
+- `default_unit_price` optional value if you want to set a fixed unit price for your energy – if not set, the unit price will be automatically fetched. Note that the `default_unit_price` does not have an effect with the `EXCHANGE` contract type.
 
 4. Restart HA
 

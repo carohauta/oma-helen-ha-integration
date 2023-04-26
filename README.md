@@ -43,6 +43,8 @@ sensor:
   - platform: helen_energy
     vat: 0.1 # 10%
     contract_type: EXCHANGE
+    default_base_price: 3.0 # optional value in EUR
+    default_unit_price: 10.0 # optional value in c/kwh
     username: !secret oma_helen_username
     password: !secret oma_helen_password
 ```
@@ -51,6 +53,8 @@ sensor:
   - EXCHANGE
   - SMART_GUARANTEE
   - MARKET
+- `default_base_price` optional value if you want to set a fixed base price for your contract – if not set, the base price will be automatically fetched
+- `default_unit_price` optional value if you want to set a fixed unit price for your energy – if not set, the unit price will be automatically fetched
 
 4. Restart HA
 

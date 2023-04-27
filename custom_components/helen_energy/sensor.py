@@ -182,7 +182,7 @@ class HelenMarketPriceElectricity(Entity):
     ):
         super().__init__()
         self.credentials = credentials
-        self.id = "market_price_electricity_calculations"
+        self.id = "helen_market_price_electricity"
         self._name = "Helen Market Price Electricity"
         self._api_client = helen_api_client
         self._price_client = helen_price_client
@@ -296,7 +296,7 @@ class HelenExchangeElectricity(Entity):
     ):
         super().__init__()
         self.credentials = credentials
-        self.id = "exchange_electricity_calculations"
+        self.id = "helen_exchange_electricity"
         self._name = "Helen Exchange Electricity"
         self._api_client = helen_api_client
         self._price_client = helen_price_client
@@ -396,7 +396,7 @@ class HelenSmartGuarantee(Entity):
     ):
         super().__init__()
         self.credentials = credentials
-        self.id = "smart_guarantee_electricity_calculations"
+        self.id = "helen_smart_guarantee"
         self._name = "Helen Smart Guarantee"
         self._api_client = helen_api_client
         self._price_client = helen_price_client

@@ -42,9 +42,10 @@ oma_helen_password: <PASSWORD>
 sensor:
   - platform: helen_energy
     vat: 0.1 # 10%
-    contract_type: EXCHANGE
+    contract_type: SMART_GUARANTEE
     default_base_price: 3.0 # optional value in EUR
     default_unit_price: 10.0 # optional value in c/kwh
+    include_transfer_costs: True # optional boolean (True/False)
     username: !secret oma_helen_username
     password: !secret oma_helen_password
 ```
@@ -55,6 +56,7 @@ sensor:
   - MARKET
 - `default_base_price` optional value if you want to set a fixed base price for your contract – if not set, the base price will be automatically fetched
 - `default_unit_price` optional value if you want to set a fixed unit price for your energy – if not set, the unit price will be automatically fetched. Note that the `default_unit_price` does not have an effect with the `EXCHANGE` contract type.
+- `include_transfer_costs` optional boolean for fetching energy transfer costs for the on-going month - shows `0.0` if Helen is not your transfer company
 
 4. Restart HA
 
@@ -65,7 +67,12 @@ Depending on your contract type you will see one of the following new entities:
 - sensor.helen_smart_guarantee
 - sensor.helen_market_price_electricity
 
-The `state` of each entity is the total energy cost of the on-going month. In the state attributes you may find some other useful information like last month's and current month's energy consumptions, daily average consumption, usage impact on price, current electricity price (in fixed contracts) etc. Use template sensors to display the attributes. 
+The `state` of each entity is the total energy cost of the on-going month. In the state attributes you may find some other useful information like last month's and current month's energy consumptions, daily average consumption, usage impact on price, current electricity price (in fixed contracts) etc. Use template sensors to display the attributes.
+
+If you have chosen to include the transfer costs you will also see the following entity:
+- sensor.helen_transfer_costs
+
+The `state` of the entity shows the total energy transfer costs for the on-going month. The price is presented in EUR and it includes the base price of your transfer contract. If Helen is not your energy transfer company, this entity does not serve a purpose and shows a default value of `0.0`.
 
 #### Examples
 
@@ -300,5 +307,5 @@ cards:
       - type: entity
         entity: sensor.helen_market_price_energy_daily_average_consumption
         name: Daily average
-
+        
 ```

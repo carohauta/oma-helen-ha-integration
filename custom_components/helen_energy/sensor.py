@@ -18,7 +18,13 @@ from homeassistant.helpers.typing import (
 )
 import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from .const import CONF_DEFAULT_BASE_PRICE, CONF_DEFAULT_UNIT_PRICE, CONF_VAT, CONF_CONTRACT_TYPE
+from .const import (
+    CONF_DEFAULT_BASE_PRICE,
+    CONF_DEFAULT_UNIT_PRICE,
+    CONF_VAT,
+    CONF_CONTRACT_TYPE,
+    CONF_INCLUDE_TRANSFER_COSTS,
+)
 from helenservice.price_client import HelenPriceClient
 from helenservice.api_client import HelenApiClient
 from helenservice.utils import get_month_date_range_by_date
@@ -34,6 +40,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Required(CONF_CONTRACT_TYPE): cv.string,
         vol.Optional(CONF_DEFAULT_UNIT_PRICE): cv.positive_float,
         vol.Optional(CONF_DEFAULT_BASE_PRICE): cv.positive_float,
+        vol.Optional(CONF_INCLUDE_TRANSFER_COSTS): cv.boolean,
     }
 )
 
@@ -71,6 +78,7 @@ def setup_platform(
     password = config.get(CONF_PASSWORD)
     default_unit_price = config.get(CONF_DEFAULT_UNIT_PRICE)
     default_base_price = config.get(CONF_DEFAULT_BASE_PRICE)
+    include_transfer_costs = config.get(CONF_INCLUDE_TRANSFER_COSTS)
 
     helen_price_client = HelenPriceClient()
 
@@ -85,19 +93,36 @@ def setup_platform(
     if contract_type == "MARKET":
         entities.append(
             HelenMarketPriceElectricity(
-                helen_api_client, helen_price_client, credentials, default_base_price, default_unit_price
+                helen_api_client,
+                helen_price_client,
+                credentials,
+                default_base_price,
+                default_unit_price,
             )
         )
     elif contract_type == "EXCHANGE":
         if default_unit_price is not None:
-            _LOGGER.warn("Default unit price has been set but it will not be used with EXCHANGE contract type.")
+            _LOGGER.warn(
+                "Default unit price has been set but it will not be used with EXCHANGE contract type."
+            )
         entities.append(
-            HelenExchangeElectricity(helen_api_client, helen_price_client, credentials, default_base_price)
+            HelenExchangeElectricity(
+                helen_api_client, helen_price_client, credentials, default_base_price
+            )
         )
     elif contract_type == "SMART_GUARANTEE":
         entities.append(
-            HelenSmartGuarantee(helen_api_client, helen_price_client, credentials, default_base_price, default_unit_price)
+            HelenSmartGuarantee(
+                helen_api_client,
+                helen_price_client,
+                credentials,
+                default_base_price,
+                default_unit_price,
+            )
         )
+
+    if include_transfer_costs == True:
+        entities.append(HelenTransferPrice(helen_api_client, credentials))
 
     add_entities(
         entities,
@@ -111,7 +136,8 @@ def _get_total_consumption_between_dates(
     measurement_response: MeasurementResponse = (
         helen_api_client.get_daily_measurements_between_dates(start_date, end_date)
     )
-    if not measurement_response.intervals.electricity: return 0.0
+    if not measurement_response.intervals.electricity:
+        return 0.0
     total = sum(
         list(
             map(
@@ -136,13 +162,20 @@ def _get_total_consumption_for_current_month(helen_api_client):
     return _get_total_consumption_between_dates(helen_api_client, start_date, end_date)
 
 
+def get_transfer_price_total_for_current_month(helen_api_client: HelenApiClient):
+    """Get the total energy transfer price"""
+    start_date, end_date = get_month_date_range_by_date(date.today())
+    return helen_api_client.calculate_transfer_fees_between_dates(start_date, end_date)
+
+
 def _get_average_daily_consumption_for_current_month(helen_api_client: HelenApiClient):
     """Average daily consumption for current month"""
     start_date, end_date = get_month_date_range_by_date(date.today())
     measurement_response: MeasurementResponse = (
         helen_api_client.get_daily_measurements_between_dates(start_date, end_date)
     )
-    if not measurement_response.intervals.electricity: return 0
+    if not measurement_response.intervals.electricity:
+        return 0
     valid_measurements = list(
         map(
             lambda m: m.value,
@@ -177,7 +210,7 @@ class HelenMarketPriceElectricity(Entity):
         helen_api_client: HelenApiClient,
         helen_price_client: HelenPriceClient,
         credentials,
-        default_base_price, 
+        default_base_price,
         default_unit_price,
     ):
         super().__init__()
@@ -187,7 +220,7 @@ class HelenMarketPriceElectricity(Entity):
         self._api_client = helen_api_client
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
-        self._default_base_price = default_base_price 
+        self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
 
     @property
@@ -232,7 +265,11 @@ class HelenMarketPriceElectricity(Entity):
         return last_month_cost
 
     def _calculate_current_month_price_estimate(self):
-        current_month_price = self._default_unit_price / 100 if self._default_unit_price is not None else getattr(self._prices, "current_month") / 100
+        current_month_price = (
+            self._default_unit_price / 100
+            if self._default_unit_price is not None
+            else getattr(self._prices, "current_month") / 100
+        )
         current_month_consumption = _get_total_consumption_for_current_month(
             self._api_client
         )
@@ -250,15 +287,23 @@ class HelenMarketPriceElectricity(Entity):
         self._api_client.login(**self.credentials)
         self._prices = self._price_client.get_market_price_prices()
         self._price_last_month = getattr(self._prices, "last_month")
-        self._price_current_month = self._default_unit_price if self._default_unit_price is not None else getattr(self._prices, "current_month")
+        self._price_current_month = (
+            self._default_unit_price
+            if self._default_unit_price is not None
+            else getattr(self._prices, "current_month")
+        )
         self._price_next_month = getattr(self._prices, "next_month")
-        try: 
+        try:
             fetched_base_price = self._api_client.get_contract_base_price()
             self._contract_base_price = fetched_base_price
-            self._latest_base_price = fetched_base_price # save the latest value
+            self._latest_base_price = fetched_base_price  # save the latest value
         except InvalidApiResponseException:
-            _LOGGER.error("Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't")
-            self._contract_base_price = self._latest_base_price if self._latest_base_price is not None else 0
+            _LOGGER.error(
+                "Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't"
+            )
+            self._contract_base_price = (
+                self._latest_base_price if self._latest_base_price is not None else 0
+            )
 
         if self._default_base_price is not None:
             _LOGGER.info(f"Using the default base price: {self._default_base_price}")
@@ -301,7 +346,7 @@ class HelenExchangeElectricity(Entity):
         self._api_client = helen_api_client
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
-        self._default_base_price = default_base_price 
+        self._default_base_price = default_base_price
 
     @property
     def unique_id(self) -> str:
@@ -350,13 +395,17 @@ class HelenExchangeElectricity(Entity):
             )
         )
 
-        try: 
+        try:
             fetched_base_price = self._api_client.get_contract_base_price()
             self._contract_base_price = fetched_base_price
-            self._latest_base_price = fetched_base_price # save the latest value
+            self._latest_base_price = fetched_base_price  # save the latest value
         except InvalidApiResponseException:
-            _LOGGER.error("Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't")
-            self._contract_base_price = self._latest_base_price if self._latest_base_price is not None else 0
+            _LOGGER.error(
+                "Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't"
+            )
+            self._contract_base_price = (
+                self._latest_base_price if self._latest_base_price is not None else 0
+            )
 
         if self._default_base_price is not None:
             _LOGGER.info(f"Using the default base price: {self._default_base_price}")
@@ -401,7 +450,7 @@ class HelenSmartGuarantee(Entity):
         self._api_client = helen_api_client
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
-        self._default_base_price = default_base_price 
+        self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
 
     @property
@@ -449,13 +498,17 @@ class HelenSmartGuarantee(Entity):
             *get_month_date_range_by_date(current_month)
         )
 
-        try: 
+        try:
             fetched_base_price = self._api_client.get_contract_base_price()
             self._contract_base_price = fetched_base_price
-            self._latest_base_price = fetched_base_price # save the latest value
+            self._latest_base_price = fetched_base_price  # save the latest value
         except InvalidApiResponseException:
-            _LOGGER.error("Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't")
-            self._contract_base_price = self._latest_base_price if self._latest_base_price is not None else 0
+            _LOGGER.error(
+                "Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't"
+            )
+            self._contract_base_price = (
+                self._latest_base_price if self._latest_base_price is not None else 0
+            )
 
         if self._default_base_price is not None:
             _LOGGER.info(f"Using the default base price: {self._default_base_price}")
@@ -463,15 +516,21 @@ class HelenSmartGuarantee(Entity):
 
         unit_price = 0
 
-        try: 
+        try:
             unit_price = self._api_client.get_contract_energy_unit_price()
-            self._latest_unit_price = unit_price # save the latest value
+            self._latest_unit_price = unit_price  # save the latest value
         except InvalidApiResponseException:
-            _LOGGER.error("Received invalid response from Helen API when fetching energy unti price - using the latest value if it exists, or 0 if it doesn't")
-            unit_price = self._latest_unit_price if self._latest_unit_price is not None else 0
+            _LOGGER.error(
+                "Received invalid response from Helen API when fetching energy unti price - using the latest value if it exists, or 0 if it doesn't"
+            )
+            unit_price = (
+                self._latest_unit_price if self._latest_unit_price is not None else 0
+            )
 
         if self._default_unit_price is not None:
-            _LOGGER.info(f"Using the default energy unit price: {self._default_unit_price}")
+            _LOGGER.info(
+                f"Using the default energy unit price: {self._default_unit_price}"
+            )
             unit_price = self._default_unit_price
 
         current_month_energy_price_with_impact = (
@@ -490,4 +549,43 @@ class HelenSmartGuarantee(Entity):
             _get_average_daily_consumption_for_current_month(self._api_client)
         )
         self._current_month_consumption = current_month_total_consumption
+        self._api_client.close()
+
+
+class HelenTransferPrice(Entity):
+    attrs: Dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
+
+    def __init__(
+        self,
+        helen_api_client: HelenApiClient,
+        credentials,
+    ):
+        super().__init__()
+        self.credentials = credentials
+        self.id = "helen_transfer_costs"
+        self._name = "Helen Transfer Costs"
+        self._api_client = helen_api_client
+        self._state = STATE_UNAVAILABLE
+
+    @property
+    def unique_id(self) -> str:
+        """Return the unique ID of the sensor."""
+        return self.id
+
+    @property
+    def state_attributes(self) -> Dict[str, Any]:
+        return self.attrs
+
+    @property
+    def name(self) -> str:
+        """Return the name of the entity."""
+        return self._name
+
+    @property
+    def state(self) -> Optional[str]:
+        return self._state
+
+    def update(self):
+        self._api_client.login(**self.credentials)
+        self._state = get_transfer_price_total_for_current_month(self._api_client)
         self._api_client.close()

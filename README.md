@@ -10,6 +10,7 @@ The integration works for the following contract types:
 - Exchange Electricity (=pörssisähkö) https://www.helen.fi/en/electricity/electricity-products-and-prices/exchange-electricity
 - Smart Electricity Guarantee https://www.helen.fi/en/electricity/electricity-products-and-prices/smart-electricity-guarantee
 - Market Price Electricity https://www.helen.fi/en/electricity/electricity-products-and-prices/marketpriceelectricity
+- Fixed Price Electricity https://www.helen.fi/en/electricity/electricity-products-and-prices/fixed-price-basic-electricity
 
 ### How to install
 
@@ -42,7 +43,7 @@ oma_helen_password: <PASSWORD>
 sensor:
   - platform: helen_energy
     vat: 0.1 # 10%
-    contract_type: SMART_GUARANTEE
+    contract_type: FIXED
     default_base_price: 3.0 # optional value in EUR
     default_unit_price: 10.0 # optional value in c/kwh
     include_transfer_costs: True # optional boolean (True/False)
@@ -54,6 +55,7 @@ sensor:
   - EXCHANGE
   - SMART_GUARANTEE
   - MARKET
+  - FIXED
 - `default_base_price` optional value if you want to set a fixed base price for your contract – if not set, the base price will be automatically fetched
 - `default_unit_price` optional value if you want to set a fixed unit price for your energy – if not set, the unit price will be automatically fetched. Note that the `default_unit_price` does not have an effect with the `EXCHANGE` contract type.
 - `include_transfer_costs` optional boolean for fetching energy transfer costs for the on-going month - shows `0.0` if Helen is not your transfer company
@@ -66,6 +68,7 @@ Depending on your contract type you will see one of the following new entities:
 - sensor.helen_exchange_electricity
 - sensor.helen_smart_guarantee
 - sensor.helen_market_price_electricity
+- sensor.helen_fixed_price_electricity
 
 The `state` of each entity is the total energy cost of the on-going month. In the state attributes you may find some other useful information like last month's and current month's energy consumptions, daily average consumption, usage impact on price, current electricity price (in fixed contracts) etc. Use template sensors to display the attributes.
 
@@ -308,4 +311,78 @@ cards:
         entity: sensor.helen_market_price_energy_daily_average_consumption
         name: Daily average
         
+```
+
+#### Fixed Price Electricity
+
+Template sensors:
+```yml
+sensor:
+  - platform: helen_energy
+    username: !secret oma_helen_username
+    password: !secret oma_helen_password
+    vat: 0.1
+    contract_type: FIXED
+  - platform: template
+    sensors:
+      helen_fixed_price_electricity_consumption:
+        friendly_name: "This month energy consumption"
+        unit_of_measurement: "kWh"
+        icon_template: mdi:lightning-bolt
+        value_template: >
+          {{ state_attr('sensor.helen_fixed_price_electricity', 'current_month_consumption') | round() }}
+      helen_fixed_price_electricity_consumption_last_month:
+        friendly_name: "Last month energy consumption"
+        unit_of_measurement: "kWh"
+        icon_template: mdi:lightning-bolt
+        value_template: >
+          {{ state_attr('sensor.helen_fixed_price_electricity', 'last_month_consumption') | round() }}
+      helen_fixed_price_electricity_unit_price:
+        friendly_name: "This month energy price"
+        unit_of_measurement: "c/kWh"
+        icon_template: mdi:currency-eur
+        value_template: >
+          {{ state_attr('sensor.helen_fixed_price_electricity', 'fixed_unit_price') | round(2) }}
+      helen_fixed_price_electricity_daily_average_consumption:
+        friendly_name: "Daily average consumption"
+        unit_of_measurement: "kWh"
+        icon_template: mdi:lightning-bolt
+        value_template: >
+          {{ state_attr('sensor.helen_fixed_price_electricity', 'daily_average_consumption') | round() }}
+
+```
+
+Lovelace Card:
+```yml
+type: vertical-stack
+cards:
+  - type: markdown
+    content: ' # Energy consumption'
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.helen_fixed_price_electricity
+        name: This month est.
+        unit: EUR
+        icon: None
+      - type: entity
+        entity: sensor.helen_fixed_price_electricity_consumption
+        name: Used so far...
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.helen_fixed_price_electricity_unit_price
+        icon: None
+        name: Current price
+      - type: entity
+        entity: sensor.helen_fixed_price_electricity_consumption_last_month
+        name: Last month
+  - type: horizontal-stack
+    cards:
+      - type: markdown
+        content: ' '
+      - type: entity
+        entity: sensor.helen_fixed_price_electricity_daily_average_consumption
+        name: Daily average
+
 ```

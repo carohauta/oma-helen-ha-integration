@@ -64,6 +64,10 @@ STATE_ATTR_PRICE_LAST_MONTH = "price_last_month"
 STATE_ATTR_PRICE_CURRENT_MONTH = "price_current_month"
 STATE_ATTR_PRICE_NEXT_MONTH = "price_next_month"
 
+# fixed price
+STATE_ATTR_FIXED_UNIT_PRICE = "fixed_unit_price"
+STATE_ATTR_FIXED_UNIT_PRICE_UNIT_OF_MEASUREMENT = "fixed_unit_price_unit_of_measurement"
+
 
 def setup_platform(
     hass: HomeAssistant,
@@ -113,6 +117,16 @@ def setup_platform(
     elif contract_type == "SMART_GUARANTEE":
         entities.append(
             HelenSmartGuarantee(
+                helen_api_client,
+                helen_price_client,
+                credentials,
+                default_base_price,
+                default_unit_price,
+            )
+        )
+    elif contract_type == "FIXED":
+        entities.append(
+            HelenFixedPriceElectricity(
                 helen_api_client,
                 helen_price_client,
                 credentials,
@@ -551,6 +565,123 @@ class HelenSmartGuarantee(Entity):
         self._current_month_consumption = current_month_total_consumption
         self._api_client.close()
 
+class HelenFixedPriceElectricity(Entity):
+    attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
+    _contract_base_price = None
+    _last_month_consumption = None
+    _current_month_consumption = None
+    _fixed_unit_price = None
+    _average_daily_consumption = None
+    _latest_base_price = None
+    _latest_unit_price = None
+
+    def __init__(
+        self,
+        helen_api_client: HelenApiClient,
+        helen_price_client: HelenPriceClient,
+        credentials,
+        default_base_price,
+        default_unit_price,
+    ):
+        super().__init__()
+        self.credentials = credentials
+        self.id = "helen_fixed_price_electricity"
+        self._name = "Helen Fixed Price Electricity"
+        self._api_client = helen_api_client
+        self._price_client = helen_price_client
+        self._state = STATE_UNAVAILABLE
+        self._default_base_price = default_base_price
+        self._default_unit_price = default_unit_price
+
+    @property
+    def unique_id(self) -> str:
+        """Return the unique ID of the sensor."""
+        return self.id
+
+    @property
+    def state_attributes(self) -> Dict[str, Any]:
+        return self.attrs
+
+    @property
+    def name(self) -> str:
+        """Return the name of the entity."""
+        return self._name
+
+    @property
+    def state(self) -> Optional[str]:
+        return self._state
+
+    @property
+    def extra_state_attributes(self):
+        """Return the extra state attributes of the measurement."""
+        return {
+            STATE_ATTR_CONTRACT_BASE_PRICE: self._contract_base_price,
+            STATE_ATTR_LAST_MONTH_CONSUMPTION: self._last_month_consumption,
+            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: self._current_month_consumption,
+            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: self._average_daily_consumption,
+            STATE_ATTR_FIXED_UNIT_PRICE: self._fixed_unit_price,
+            STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
+            STATE_ATTR_FIXED_UNIT_PRICE_UNIT_OF_MEASUREMENT: "c/kWh",
+        }
+
+    def update(self):
+        self._api_client.login(**self.credentials)
+        self._contract_base_price = self._api_client.get_contract_base_price()
+        current_month_total_consumption = self._current_month_consumption = math.ceil(
+            _get_total_consumption_for_current_month(self._api_client)
+        )
+        self._current_month_consumption = current_month_total_consumption
+        self._last_month_consumption = math.ceil(
+            _get_total_consumption_for_last_month(self._api_client)
+        )
+
+        try:
+            fetched_base_price = self._api_client.get_contract_base_price()
+            self._contract_base_price = fetched_base_price
+            self._latest_base_price = fetched_base_price  # save the latest value
+        except InvalidApiResponseException:
+            _LOGGER.error(
+                "Received invalid response from Helen API when fetching contract base price - using the latest value if it exists, or 0 if it doesn't"
+            )
+            self._contract_base_price = (
+                self._latest_base_price if self._latest_base_price is not None else 0
+            )
+
+        if self._default_base_price is not None:
+            _LOGGER.info(f"Using the default base price: {self._default_base_price}")
+            self._contract_base_price = self._default_base_price
+
+        unit_price = 0
+
+        try:
+            unit_price = self._api_client.get_contract_energy_unit_price()
+            self._latest_unit_price = unit_price  # save the latest value
+        except InvalidApiResponseException:
+            _LOGGER.error(
+                "Received invalid response from Helen API when fetching energy unit price - using the latest value if it exists, or 0 if it doesn't"
+            )
+            unit_price = (
+                self._latest_unit_price if self._latest_unit_price is not None else 0
+            )
+
+        if self._default_unit_price is not None:
+            _LOGGER.info(
+                f"Using the default energy unit price: {self._default_unit_price}"
+            )
+            unit_price = self._default_unit_price
+
+        self._fixed_unit_price = unit_price
+        current_month_total_cost = (
+            current_month_total_consumption * unit_price/100
+            + self._contract_base_price
+        )
+        self._state = math.ceil(current_month_total_cost)
+        self._current_month_consumption = current_month_total_consumption
+        self._average_daily_consumption = math.ceil(
+            _get_average_daily_consumption_for_current_month(self._api_client)
+        )
+        self._current_month_consumption = current_month_total_consumption
+        self._api_client.close()
 
 class HelenTransferPrice(Entity):
     attrs: Dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}

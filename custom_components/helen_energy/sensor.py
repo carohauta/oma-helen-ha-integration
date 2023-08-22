@@ -7,8 +7,8 @@ from dateutil.relativedelta import relativedelta
 from helenservice.api_response import MeasurementResponse
 from helenservice.api_exceptions import InvalidApiResponseException
 from homeassistant.core import HomeAssistant
-from homeassistant.components.sensor import PLATFORM_SCHEMA, SCAN_INTERVAL
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, STATE_UNAVAILABLE
+from homeassistant.components.sensor import PLATFORM_SCHEMA, SCAN_INTERVAL, SensorDeviceClass, SensorStateClass, SensorEntity
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, STATE_UNAVAILABLE, UnitOfEnergy
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -124,6 +124,8 @@ def setup_platform(
     if include_transfer_costs == True:
         entities.append(HelenTransferPrice(helen_api_client, credentials))
 
+    entities.append(HelenMonthlyConsumption(helen_api_client, credentials))
+
     add_entities(
         entities,
         True,
@@ -193,7 +195,7 @@ def _get_average_daily_consumption_for_current_month(helen_api_client: HelenApiC
 
 
 class HelenMarketPriceElectricity(Entity):
-    attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
+    attrs: Dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
     _contract_base_price = None
     _prices = None
     _last_month_total_cost = None
@@ -324,7 +326,7 @@ class HelenMarketPriceElectricity(Entity):
 
 
 class HelenExchangeElectricity(Entity):
-    attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
+    attrs: Dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
     _contract_base_price = None
     _last_month_total_cost = None
     _last_month_consumption = None
@@ -426,7 +428,7 @@ class HelenExchangeElectricity(Entity):
 
 
 class HelenSmartGuarantee(Entity):
-    attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
+    attrs: Dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
     _contract_base_price = None
     _last_month_consumption = None
     _current_month_consumption = None
@@ -588,4 +590,31 @@ class HelenTransferPrice(Entity):
     def update(self):
         self._api_client.login(**self.credentials)
         self._state = get_transfer_price_total_for_current_month(self._api_client)
+        self._api_client.close()
+
+class HelenMonthlyConsumption(SensorEntity):
+    _attr_name = "Helen Monthly Consumption"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:home-lightning-bolt"
+
+    def __init__(
+        self,
+        helen_api_client: HelenApiClient,
+        credentials,
+    ):
+        super().__init__()
+        self.credentials = credentials
+        self.id = "helen_monthly_consumption"
+        self._api_client = helen_api_client
+
+    @property
+    def unique_id(self) -> str:
+        """Return the unique ID of the sensor."""
+        return self.id
+
+    def update(self) -> None:
+        self._api_client.login(**self.credentials)
+        self._attr_native_value = _get_total_consumption_for_current_month(self._api_client)
         self._api_client.close()

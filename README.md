@@ -77,6 +77,11 @@ If you have chosen to include the transfer costs you will also see the following
 
 The `state` of the entity shows the total energy transfer costs for the on-going month. The price is presented in EUR and it includes the base price of your transfer contract. If Helen is not your energy transfer company, this entity does not serve a purpose and shows a default value of `0.0`.
 
+The integration also supports HA energy dashboard via the following entity:
+- sensor.helen_monthly_consumption
+
+The `state` of the sensor is the total energy consumption (in kWh) of the on-going month.
+
 ### Examples
 
 Configuration examples for each contract type including template sensors and lovelace card examples.

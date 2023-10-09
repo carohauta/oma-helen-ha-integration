@@ -77,7 +77,7 @@ If you have chosen to include the transfer costs you will also see the following
 
 The `state` of the entity shows the total energy transfer costs for the on-going month. The price is presented in EUR and it includes the base price of your transfer contract. If Helen is not your energy transfer company, this entity does not serve a purpose and shows a default value of `0.0`.
 
-#### Examples
+### Examples
 
 Configuration examples for each contract type including template sensors and lovelace card examples.
 
@@ -97,26 +97,27 @@ sensor:
         friendly_name: "This month energy consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
+        device_class: "energy"
         value_template: >
-          {{ state_attr('sensor.helen_exchange_electricity', 'current_month_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_exchange_electricity', 'current_month_consumption') == None else state_attr('sensor.helen_exchange_electricity', 'current_month_consumption') | round() }}
       helen_exchange_energy_consumption_last_month:
         friendly_name: "Last month energy consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_exchange_electricity', 'last_month_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_exchange_electricity', 'last_month_consumption') == None else state_attr('sensor.helen_exchange_electricity', 'last_month_consumption')| round() }}
       helen_exchange_energy_last_month_total_cost:
         friendly_name: "Last month energy cost"
         unit_of_measurement: "e"
         icon_template: mdi:currency-eur
         value_template: >
-            {{ state_attr('sensor.helen_exchange_electricity', 'last_month_total_cost') | round() }}
+            {{ 0 if state_attr('sensor.helen_exchange_electricity', 'last_month_total_cost') == None else state_attr('sensor.helen_exchange_electricity', 'last_month_total_cost') | round() }}
       helen_exchange_energy_daily_average_consumption:
         friendly_name: "Daily average consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_exchange_electricity', 'daily_average_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_exchange_electricity', 'daily_average_consumption') == None else state_attr('sensor.helen_exchange_electricity', 'daily_average_consumption') | round() }}
 
 ```
 
@@ -171,27 +172,28 @@ sensor:
       helen_smart_guarantee_energy_consumption:
         friendly_name: "This month energy consumption"
         unit_of_measurement: "kWh"
+        device_class: "energy"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_smart_guarantee', 'current_month_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_smart_guarantee', 'current_month_consumption') == None else state_attr('sensor.helen_smart_guarantee', 'current_month_consumption') | round() }}
       helen_smart_guarantee_energy_consumption_last_month:
         friendly_name: "Last month energy consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_smart_guarantee', 'last_month_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_smart_guarantee', 'last_month_consumption') == None else state_attr('sensor.helen_smart_guarantee', 'last_month_consumption') | round() }}
       helen_smart_guarantee_energy_price_current_month:
         friendly_name: "This month energy price"
         unit_of_measurement: "c/kWh"
         icon_template: mdi:currency-eur
         value_template: >
-          {{ (state_attr('sensor.helen_smart_guarantee', 'current_month_price_with_impact') * 100) | round(2) }}
+          {{ 0 if state_attr('sensor.helen_smart_guarantee', 'current_month_price_with_impact') == None else (state_attr('sensor.helen_smart_guarantee', 'current_month_price_with_impact') * 100) | round(2) }}
       helen_smart_guarantee_energy_daily_average_consumption:
         friendly_name: "Daily average consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_smart_guarantee', 'daily_average_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_smart_guarantee', 'daily_average_consumption') == None else state_attr('sensor.helen_smart_guarantee', 'daily_average_consumption')| round() }}
 
 ```
 
@@ -245,33 +247,34 @@ sensor:
       helen_market_price_energy_consumption:
         friendly_name: "This month energy consumption"
         unit_of_measurement: "kWh"
+        device_class: "energy"
         icon_template: mdi:lightning-bolt
         value_template: >
-            {{ state_attr('sensor.helen_market_price_electricity', 'current_month_consumption') | round() }}
+            {{ 0 if state_attr('sensor.helen_market_price_electricity', 'current_month_consumption') == None else state_attr('sensor.helen_market_price_electricity', 'current_month_consumption') | round() }}
       helen_market_price_energy_consumption_last_month:
         friendly_name: "Last month energy consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-            {{ state_attr('sensor.helen_market_price_electricity', 'last_month_consumption') | round() }}
+            {{ 0 if state_attr('sensor.helen_market_price_electricity', 'last_month_consumption') == None else state_attr('sensor.helen_market_price_electricity', 'last_month_consumption') | round() }}
       helen_market_price_energy_last_month_total_cost:
         friendly_name: "Last month energy cost"
         unit_of_measurement: "e"
         icon_template: mdi:currency-eur
         value_template: >
-            {{ state_attr('sensor.helen_market_price_electricity', 'last_month_total_cost') | round() }}
+            {{ 0 if state_attr('sensor.helen_market_price_electricity', 'last_month_total_cost') == None else state_attr('sensor.helen_market_price_electricity', 'last_month_total_cost') | round() }}
       helen_market_price_energy_daily_average_consumption:
         friendly_name: "Daily average consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-            {{ state_attr('sensor.helen_market_price_electricity', 'daily_average_consumption') | round() }}
+            {{ 0 if state_attr('sensor.helen_market_price_electricity', 'daily_average_consumption') == None else state_attr('sensor.helen_market_price_electricity', 'daily_average_consumption') | round() }}
       helen_market_price_energy_price_current_month:
         friendly_name: "This month energy price"
         unit_of_measurement: "c/kWh"
         icon_template: mdi:currency-eur
         value_template: >
-            {{ state_attr('sensor.helen_market_price_electricity', 'price_current_month') | round(2) }}
+            {{ 0 if state_attr('sensor.helen_market_price_electricity', 'price_current_month') == None else state_attr('sensor.helen_market_price_electricity', 'price_current_month') | round(2) }}
             
 ```
 
@@ -328,27 +331,28 @@ sensor:
       helen_fixed_price_electricity_consumption:
         friendly_name: "This month energy consumption"
         unit_of_measurement: "kWh"
+        device_class: "energy"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_fixed_price_electricity', 'current_month_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_fixed_price_electricity', 'current_month_consumption') == None else state_attr('sensor.helen_fixed_price_electricity', 'current_month_consumption') | round() }}
       helen_fixed_price_electricity_consumption_last_month:
         friendly_name: "Last month energy consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_fixed_price_electricity', 'last_month_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_fixed_price_electricity', 'last_month_consumption') == None else state_attr('sensor.helen_fixed_price_electricity', 'last_month_consumption') | round() }}
       helen_fixed_price_electricity_unit_price:
         friendly_name: "This month energy price"
         unit_of_measurement: "c/kWh"
         icon_template: mdi:currency-eur
         value_template: >
-          {{ state_attr('sensor.helen_fixed_price_electricity', 'fixed_unit_price') | round(2) }}
+          {{ 0 if state_attr('sensor.helen_fixed_price_electricity', 'fixed_unit_price') == None else state_attr('sensor.helen_fixed_price_electricity', 'fixed_unit_price') | round(2) }}
       helen_fixed_price_electricity_daily_average_consumption:
         friendly_name: "Daily average consumption"
         unit_of_measurement: "kWh"
         icon_template: mdi:lightning-bolt
         value_template: >
-          {{ state_attr('sensor.helen_fixed_price_electricity', 'daily_average_consumption') | round() }}
+          {{ 0 if state_attr('sensor.helen_fixed_price_electricity', 'daily_average_consumption') == None else state_attr('sensor.helen_fixed_price_electricity', 'daily_average_consumption') | round() }}
 
 ```
 

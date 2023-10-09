@@ -146,6 +146,13 @@ def setup_platform(
     )
 
 
+def _login_helen_api_if_needed(helen_api_client: HelenApiClient, credentials):
+    if helen_api_client.is_session_valid():
+        return
+    helen_api_client.close()
+    helen_api_client.login(**credentials)
+
+
 def _get_total_consumption_between_dates(
     helen_api_client: HelenApiClient, start_date: date, end_date: date
 ):
@@ -300,7 +307,7 @@ class HelenMarketPriceElectricity(Entity):
         return math.ceil(current_month_cost_estimate)
 
     def update(self):
-        self._api_client.login(**self.credentials)
+        _login_helen_api_if_needed(self._api_client, self.credentials)
         self._prices = self._price_client.get_market_price_prices()
         self._price_last_month = getattr(self._prices, "last_month")
         self._price_current_month = (
@@ -395,7 +402,7 @@ class HelenExchangeElectricity(Entity):
         }
 
     def update(self):
-        self._api_client.login(**self.credentials)
+        _login_helen_api_if_needed(self._api_client, self.credentials)
         margin = self._price_client.get_exchange_prices().margin
         self._api_client.set_margin(margin)
         current_month = date.today()
@@ -500,7 +507,7 @@ class HelenSmartGuarantee(Entity):
         }
 
     def update(self):
-        self._api_client.login(**self.credentials)
+        _login_helen_api_if_needed(self._api_client, self.credentials)
         self._contract_base_price = self._api_client.get_contract_base_price()
         current_month_total_consumption = self._current_month_consumption = math.ceil(
             _get_total_consumption_for_current_month(self._api_client)
@@ -568,7 +575,7 @@ class HelenSmartGuarantee(Entity):
         self._api_client.close()
 
 class HelenFixedPriceElectricity(Entity):
-    attrs: Dict[str, Any] = {"unit_of_measurement": "e", "icon": "mdi:currency-eur"}
+    attrs: Dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
     _contract_base_price = None
     _last_month_consumption = None
     _current_month_consumption = None
@@ -627,7 +634,7 @@ class HelenFixedPriceElectricity(Entity):
         }
 
     def update(self):
-        self._api_client.login(**self.credentials)
+        _login_helen_api_if_needed(self._api_client, self.credentials)
         self._contract_base_price = self._api_client.get_contract_base_price()
         current_month_total_consumption = self._current_month_consumption = math.ceil(
             _get_total_consumption_for_current_month(self._api_client)
@@ -719,7 +726,7 @@ class HelenTransferPrice(Entity):
         return self._state
 
     def update(self):
-        self._api_client.login(**self.credentials)
+        _login_helen_api_if_needed(self._api_client, self.credentials)
         self._state = get_transfer_price_total_for_current_month(self._api_client)
         self._api_client.close()
 
@@ -746,6 +753,6 @@ class HelenMonthlyConsumption(SensorEntity):
         return self.id
 
     def update(self) -> None:
-        self._api_client.login(**self.credentials)
+        _login_helen_api_if_needed(self._api_client, self.credentials)
         self._attr_native_value = _get_total_consumption_for_current_month(self._api_client)
         self._api_client.close()

@@ -47,6 +47,7 @@ sensor:
     default_base_price: 3.0 # optional value in EUR
     default_unit_price: 10.0 # optional value in c/kwh
     include_transfer_costs: True # optional boolean (True/False)
+    delivery_site_id: 123456 # optional delivery site id for when you have multiple contracts with Helen
     username: !secret oma_helen_username
     password: !secret oma_helen_password
 ```
@@ -59,6 +60,7 @@ sensor:
 - `default_base_price` optional value if you want to set a fixed base price for your contract – if not set, the base price will be automatically fetched
 - `default_unit_price` optional value if you want to set a fixed unit price for your energy – if not set, the unit price will be automatically fetched. Note that the `default_unit_price` does not have an effect with the `EXCHANGE` contract type.
 - `include_transfer_costs` optional boolean for fetching energy transfer costs for the on-going month - shows `0.0` if Helen is not your transfer company
+- `delivery_site_id` optional value for selecting a specific delivery site – if not set, will use the delivery site of the latest contract. Check your wanted delivery site id from Oma Helen
 
 4. Restart HA
 
@@ -358,6 +360,12 @@ sensor:
         icon_template: mdi:lightning-bolt
         value_template: >
           {{ 0 if state_attr('sensor.helen_fixed_price_electricity', 'daily_average_consumption') == None else state_attr('sensor.helen_fixed_price_electricity', 'daily_average_consumption') | round() }}
+      helen_fixed_price_electricity_total_cost_last_month:
+        friendly_name: "Last month total"
+        unit_of_measurement: "EUR"
+        icon_template: mdi:currency-eur
+        value_template: >
+          {{ 0 if state_attr('sensor.helen_fixed_price_electricity', 'last_month_consumption') == None else (state_attr('sensor.helen_fixed_price_electricity', 'last_month_consumption') * state_attr('sensor.helen_fixed_price_electricity', 'fixed_unit_price') / 100 + state_attr('sensor.helen_fixed_price_electricity', 'contract_base_price')) | round() }}
 
 ```
 
@@ -388,8 +396,10 @@ cards:
         name: Last month
   - type: horizontal-stack
     cards:
-      - type: markdown
-        content: ' '
+      - type: entity
+        entity: sensor.helen_fixed_price_electricity_total_cost_last_month
+        name: Last month total
+        icon: None
       - type: entity
         entity: sensor.helen_fixed_price_electricity_daily_average_consumption
         name: Daily average

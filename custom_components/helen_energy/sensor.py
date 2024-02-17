@@ -7,8 +7,19 @@ from dateutil.relativedelta import relativedelta
 from helenservice.api_response import MeasurementResponse
 from helenservice.api_exceptions import InvalidApiResponseException
 from homeassistant.core import HomeAssistant
-from homeassistant.components.sensor import PLATFORM_SCHEMA, SCAN_INTERVAL, SensorDeviceClass, SensorStateClass, SensorEntity
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, STATE_UNAVAILABLE, UnitOfEnergy
+from homeassistant.components.sensor import (
+    PLATFORM_SCHEMA,
+    SCAN_INTERVAL,
+    SensorDeviceClass,
+    SensorStateClass,
+    SensorEntity,
+)
+from homeassistant.const import (
+    CONF_PASSWORD,
+    CONF_USERNAME,
+    STATE_UNAVAILABLE,
+    UnitOfEnergy,
+)
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -21,6 +32,7 @@ from homeassistant.components.sensor import PLATFORM_SCHEMA
 from .const import (
     CONF_DEFAULT_BASE_PRICE,
     CONF_DEFAULT_UNIT_PRICE,
+    CONF_DELIVERY_SITE_ID,
     CONF_VAT,
     CONF_CONTRACT_TYPE,
     CONF_INCLUDE_TRANSFER_COSTS,
@@ -41,6 +53,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_DEFAULT_UNIT_PRICE): cv.positive_float,
         vol.Optional(CONF_DEFAULT_BASE_PRICE): cv.positive_float,
         vol.Optional(CONF_INCLUDE_TRANSFER_COSTS): cv.boolean,
+        vol.Optional(CONF_DELIVERY_SITE_ID): cv.string,
     }
 )
 
@@ -83,6 +96,7 @@ def setup_platform(
     default_unit_price = config.get(CONF_DEFAULT_UNIT_PRICE)
     default_base_price = config.get(CONF_DEFAULT_BASE_PRICE)
     include_transfer_costs = config.get(CONF_INCLUDE_TRANSFER_COSTS)
+    delivery_site_id = config.get(CONF_DELIVERY_SITE_ID)
 
     helen_price_client = HelenPriceClient()
 
@@ -102,6 +116,7 @@ def setup_platform(
                 credentials,
                 default_base_price,
                 default_unit_price,
+                delivery_site_id,
             )
         )
     elif contract_type == "EXCHANGE":
@@ -111,7 +126,11 @@ def setup_platform(
             )
         entities.append(
             HelenExchangeElectricity(
-                helen_api_client, helen_price_client, credentials, default_base_price
+                helen_api_client,
+                helen_price_client,
+                credentials,
+                default_base_price,
+                delivery_site_id,
             )
         )
     elif contract_type == "SMART_GUARANTEE":
@@ -122,6 +141,7 @@ def setup_platform(
                 credentials,
                 default_base_price,
                 default_unit_price,
+                delivery_site_id,
             )
         )
     elif contract_type == "FIXED":
@@ -132,13 +152,18 @@ def setup_platform(
                 credentials,
                 default_base_price,
                 default_unit_price,
+                delivery_site_id,
             )
         )
 
     if include_transfer_costs == True:
-        entities.append(HelenTransferPrice(helen_api_client, credentials))
+        entities.append(
+            HelenTransferPrice(helen_api_client, credentials, delivery_site_id)
+        )
 
-    entities.append(HelenMonthlyConsumption(helen_api_client, credentials))
+    entities.append(
+        HelenMonthlyConsumption(helen_api_client, credentials, delivery_site_id)
+    )
 
     add_entities(
         entities,
@@ -150,7 +175,12 @@ def _login_helen_api_if_needed(helen_api_client: HelenApiClient, credentials):
     if helen_api_client.is_session_valid():
         return
     helen_api_client.close()
-    helen_api_client.login(**credentials)
+    helen_api_client.login_and_init(**credentials)
+
+
+def _select_delivery_site(helen_api_client: HelenApiClient, delivery_site_id):
+    if delivery_site_id is not None:
+        helen_api_client.select_delivery_site_if_valid_id(delivery_site_id)
 
 
 def _get_total_consumption_between_dates(
@@ -227,6 +257,7 @@ class HelenMarketPriceElectricity(Entity):
     _price_current_month = None
     _price_next_month = None
     _latest_base_price = None
+    _delivery_site_id = None
 
     def __init__(
         self,
@@ -235,6 +266,7 @@ class HelenMarketPriceElectricity(Entity):
         credentials,
         default_base_price,
         default_unit_price,
+        delivery_site_id,
     ):
         super().__init__()
         self.credentials = credentials
@@ -245,6 +277,7 @@ class HelenMarketPriceElectricity(Entity):
         self._state = STATE_UNAVAILABLE
         self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
+        self._delivery_site_id = delivery_site_id
 
     @property
     def unique_id(self) -> str:
@@ -308,6 +341,7 @@ class HelenMarketPriceElectricity(Entity):
 
     def update(self):
         _login_helen_api_if_needed(self._api_client, self.credentials)
+        _select_delivery_site(self._api_client, self._delivery_site_id)
         self._prices = self._price_client.get_market_price_prices()
         self._price_last_month = getattr(self._prices, "last_month")
         self._price_current_month = (
@@ -354,6 +388,7 @@ class HelenExchangeElectricity(Entity):
     _current_month_consumption = None
     _average_daily_consumption = None
     _latest_base_price = None
+    _delivery_site_id = None
 
     def __init__(
         self,
@@ -361,6 +396,7 @@ class HelenExchangeElectricity(Entity):
         helen_price_client: HelenPriceClient,
         credentials,
         default_base_price,
+        delivery_site_id,
     ):
         super().__init__()
         self.credentials = credentials
@@ -370,6 +406,7 @@ class HelenExchangeElectricity(Entity):
         self._price_client = helen_price_client
         self._state = STATE_UNAVAILABLE
         self._default_base_price = default_base_price
+        self._delivery_site_id = delivery_site_id
 
     @property
     def unique_id(self) -> str:
@@ -403,6 +440,7 @@ class HelenExchangeElectricity(Entity):
 
     def update(self):
         _login_helen_api_if_needed(self._api_client, self.credentials)
+        _select_delivery_site(self._api_client, self._delivery_site_id)
         margin = self._price_client.get_exchange_prices().margin
         self._api_client.set_margin(margin)
         current_month = date.today()
@@ -457,6 +495,7 @@ class HelenSmartGuarantee(Entity):
     _average_daily_consumption = None
     _latest_base_price = None
     _latest_unit_price = None
+    _delivery_site_id = None
 
     def __init__(
         self,
@@ -465,6 +504,7 @@ class HelenSmartGuarantee(Entity):
         credentials,
         default_base_price,
         default_unit_price,
+        delivery_site_id,
     ):
         super().__init__()
         self.credentials = credentials
@@ -475,6 +515,7 @@ class HelenSmartGuarantee(Entity):
         self._state = STATE_UNAVAILABLE
         self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
+        self._delivery_site_id = delivery_site_id
 
     @property
     def unique_id(self) -> str:
@@ -508,6 +549,7 @@ class HelenSmartGuarantee(Entity):
 
     def update(self):
         _login_helen_api_if_needed(self._api_client, self.credentials)
+        _select_delivery_site(self._api_client, self._delivery_site_id)
         self._contract_base_price = self._api_client.get_contract_base_price()
         current_month_total_consumption = self._current_month_consumption = math.ceil(
             _get_total_consumption_for_current_month(self._api_client)
@@ -574,6 +616,7 @@ class HelenSmartGuarantee(Entity):
         self._current_month_consumption = current_month_total_consumption
         self._api_client.close()
 
+
 class HelenFixedPriceElectricity(Entity):
     attrs: Dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
     _contract_base_price = None
@@ -583,6 +626,7 @@ class HelenFixedPriceElectricity(Entity):
     _average_daily_consumption = None
     _latest_base_price = None
     _latest_unit_price = None
+    _delivery_site_id = None
 
     def __init__(
         self,
@@ -591,6 +635,7 @@ class HelenFixedPriceElectricity(Entity):
         credentials,
         default_base_price,
         default_unit_price,
+        delivery_site_id,
     ):
         super().__init__()
         self.credentials = credentials
@@ -601,6 +646,7 @@ class HelenFixedPriceElectricity(Entity):
         self._state = STATE_UNAVAILABLE
         self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
+        self._delivery_site_id = delivery_site_id
 
     @property
     def unique_id(self) -> str:
@@ -635,6 +681,7 @@ class HelenFixedPriceElectricity(Entity):
 
     def update(self):
         _login_helen_api_if_needed(self._api_client, self.credentials)
+        _select_delivery_site(self._api_client, self._delivery_site_id)
         self._contract_base_price = self._api_client.get_contract_base_price()
         current_month_total_consumption = self._current_month_consumption = math.ceil(
             _get_total_consumption_for_current_month(self._api_client)
@@ -681,7 +728,7 @@ class HelenFixedPriceElectricity(Entity):
 
         self._fixed_unit_price = unit_price
         current_month_total_cost = (
-            current_month_total_consumption * unit_price/100
+            current_month_total_consumption * unit_price / 100
             + self._contract_base_price
         )
         self._state = math.ceil(current_month_total_cost)
@@ -692,6 +739,7 @@ class HelenFixedPriceElectricity(Entity):
         self._current_month_consumption = current_month_total_consumption
         self._api_client.close()
 
+
 class HelenTransferPrice(Entity):
     attrs: Dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
 
@@ -699,6 +747,7 @@ class HelenTransferPrice(Entity):
         self,
         helen_api_client: HelenApiClient,
         credentials,
+        delivery_site_id,
     ):
         super().__init__()
         self.credentials = credentials
@@ -706,6 +755,7 @@ class HelenTransferPrice(Entity):
         self._name = "Helen Transfer Costs"
         self._api_client = helen_api_client
         self._state = STATE_UNAVAILABLE
+        self._delivery_site_id = delivery_site_id
 
     @property
     def unique_id(self) -> str:
@@ -727,8 +777,10 @@ class HelenTransferPrice(Entity):
 
     def update(self):
         _login_helen_api_if_needed(self._api_client, self.credentials)
+        _select_delivery_site(self._api_client, self._delivery_site_id)
         self._state = get_transfer_price_total_for_current_month(self._api_client)
         self._api_client.close()
+
 
 class HelenMonthlyConsumption(SensorEntity):
     _attr_name = "Helen Monthly Consumption"
@@ -741,11 +793,13 @@ class HelenMonthlyConsumption(SensorEntity):
         self,
         helen_api_client: HelenApiClient,
         credentials,
+        delivery_site_id,
     ):
         super().__init__()
         self.credentials = credentials
         self.id = "helen_monthly_consumption"
         self._api_client = helen_api_client
+        self._delivery_site_id = delivery_site_id
 
     @property
     def unique_id(self) -> str:
@@ -754,5 +808,8 @@ class HelenMonthlyConsumption(SensorEntity):
 
     def update(self) -> None:
         _login_helen_api_if_needed(self._api_client, self.credentials)
-        self._attr_native_value = _get_total_consumption_for_current_month(self._api_client)
+        _select_delivery_site(self._api_client, self._delivery_site_id)
+        self._attr_native_value = _get_total_consumption_for_current_month(
+            self._api_client
+        )
         self._api_client.close()

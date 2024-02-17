@@ -42,7 +42,7 @@ oma_helen_password: <PASSWORD>
 ```yaml
 sensor:
   - platform: helen_energy
-    vat: 0.1 # 10%
+    vat: 0.24 # 24%
     contract_type: FIXED
     default_base_price: 3.0 # optional value in EUR
     default_unit_price: 10.0 # optional value in c/kwh

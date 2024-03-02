@@ -47,7 +47,7 @@ sensor:
     default_base_price: 3.0 # optional value in EUR
     default_unit_price: 10.0 # optional value in c/kwh
     include_transfer_costs: True # optional boolean (True/False)
-    delivery_site_id: 123456 # optional delivery site id for when you have multiple contracts with Helen
+    delivery_site_id: 643001234567891234 # optional delivery site id (GSRN) if you have multiple contracts with Helen
     username: !secret oma_helen_username
     password: !secret oma_helen_password
 ```
@@ -60,7 +60,7 @@ sensor:
 - `default_base_price` optional value if you want to set a fixed base price for your contract – if not set, the base price will be automatically fetched
 - `default_unit_price` optional value if you want to set a fixed unit price for your energy – if not set, the unit price will be automatically fetched. Note that the `default_unit_price` does not have an effect with the `EXCHANGE` contract type.
 - `include_transfer_costs` optional boolean for fetching energy transfer costs for the on-going month - shows `0.0` if Helen is not your transfer company
-- `delivery_site_id` optional value for selecting a specific delivery site – if not set, will use the delivery site of the latest contract. Check your wanted delivery site id from Oma Helen
+- `delivery_site_id` optional value for selecting a specific delivery site – if not set, will use the delivery site of the latest contract. Check your wanted delivery site id from Oma Helen. It is usually an 18 digit long GSRN number (64300xxxxxxxxxxxxx). Note that the old 7 digit delivery site id will also work. In case the entered number is not valid for some reason, the integration will log all valid options in the HA Core log.
 
 4. Restart HA
 

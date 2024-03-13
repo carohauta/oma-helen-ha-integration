@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+import pytz
 import logging
 import math
 from typing import Any, Dict, Optional
@@ -6,7 +7,7 @@ from typing import Any, Dict, Optional
 from dateutil.relativedelta import relativedelta
 from helenservice.api_response import MeasurementResponse
 from helenservice.api_exceptions import InvalidApiResponseException
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, valid_entity_id
 from homeassistant.components.sensor import (
     PLATFORM_SCHEMA,
     SCAN_INTERVAL,
@@ -40,6 +41,12 @@ from .const import (
 from helenservice.price_client import HelenPriceClient
 from helenservice.api_client import HelenApiClient
 from helenservice.utils import get_month_date_range_by_date
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+    async_import_statistics,
+    valid_statistic_id,
+)
+from homeassistant.helpers import config_validation as cv
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=3)
@@ -162,7 +169,7 @@ def setup_platform(
         )
 
     entities.append(
-        HelenMonthlyConsumption(helen_api_client, credentials, delivery_site_id)
+        HelenMonthlyConsumption(helen_api_client, credentials, delivery_site_id, hass)
     )
 
     add_entities(
@@ -243,6 +250,30 @@ def _get_average_daily_consumption_for_current_month(helen_api_client: HelenApiC
         return 0
     daily_average = sum(valid_measurements) / measurements_length
     return daily_average
+
+def _get_hourly_measurements_between_dates(helen_api_client: HelenApiClient):
+    """Average hourly consumption for current month"""
+    start_date, end_date = get_month_date_range_by_date(date.today())
+    measurement_response: MeasurementResponse = (
+        helen_api_client.get_hourly_measurements_between_dates(start_date, end_date)
+    )
+    if not measurement_response.intervals.electricity:
+        return 0
+    valid_measurements = list(
+        map(
+            lambda m: m.value,
+            filter(
+                lambda m: m.status == "valid",
+                measurement_response.intervals.electricity[0].measurements,
+            ),
+        )
+    )
+    return valid_measurements
+#    measurements_length = len(valid_measurements)
+#   if measurements_length == 0:
+#        return 0
+#    daily_average = sum(valid_measurements) / measurements_length
+#    return daily_average
 
 
 class HelenMarketPriceElectricity(Entity):
@@ -794,12 +825,14 @@ class HelenMonthlyConsumption(SensorEntity):
         helen_api_client: HelenApiClient,
         credentials,
         delivery_site_id,
+        hass: HomeAssistant,
     ):
         super().__init__()
         self.credentials = credentials
         self.id = "helen_monthly_consumption"
         self._api_client = helen_api_client
         self._delivery_site_id = delivery_site_id
+        self.hass = hass
 
     @property
     def unique_id(self) -> str:
@@ -808,6 +841,53 @@ class HelenMonthlyConsumption(SensorEntity):
 
     def update(self) -> None:
         _login_helen_api_if_needed(self._api_client, self.credentials)
+
+        valid_measurements = _get_hourly_measurements_between_dates(self._api_client)
+        _LOGGER.warning(
+            f"Helen hourly data: {valid_measurements}"
+        )
+
+        stats = []
+        metadata = {
+            "has_mean": False,
+            "has_sum": True,
+            "source": "sensor",
+            "statistic_id": "sensor:helen_hourly_consumption2",
+            "name": None,
+            "unit_of_measurement": "kWh",
+        }
+        start_date = get_month_date_range_by_date(date.today())[0]
+        helsinki_tz = pytz.timezone('Europe/Helsinki')
+        start = helsinki_tz.localize(datetime(start_date.year, start_date.month, start_date.day, 0, 0))
+
+        summa = 0
+        i = 0
+        for row in valid_measurements:
+            summa = summa + row
+            new_stat = {
+                "start": (start + relativedelta(hours=i)),
+                "sum": summa,
+                "stat": row,
+            }
+            stats.append(new_stat)
+            i = i + 1
+
+        _LOGGER.warning(
+            f"Helen hourly map: {stats}"
+        )
+        _LOGGER.warning(
+            f"Helen hourly  meta: {metadata}"
+        )
+
+        if valid_entity_id(self.id):
+            async_import_statistics(self.hass, metadata, stats)
+        elif valid_statistic_id(metadata["statistic_id"]):
+            async_add_external_statistics(self.hass, metadata, stats)
+        else:
+            _LOGGER.error(
+                f"statistic_id {self.id} is valid. Use either an existing entity ID, or a statistic id (containing a ':')"
+            )
+
         _select_delivery_site(self._api_client, self._delivery_site_id)
         self._attr_native_value = _get_total_consumption_for_current_month(
             self._api_client

@@ -1,11 +1,11 @@
 {
   "domain": "helen_energy",
   "name": "Helen Energy Price",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "documentation": "https://github.com/carohauta/oma-helen-ha-integration",
   "issue_tracker": "https://github.com/carohauta/oma-helen-ha-integration/issues",
   "requirements": [
-    "oma-helen-cli==1.3.0"
+    "oma-helen-cli==1.3.1"
   ],
   "codeowners": [
     "@carohauta"

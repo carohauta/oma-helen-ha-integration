@@ -405,3 +405,100 @@ cards:
         name: Daily average
 
 ```
+
+### SPOT PRICES BY HOURS WITH HIGHLIGHTING CURRENT HOUR
+
+This tool visualizes hourly spot electricity prices for a fixed-term Valtti-Electricity contract. It displays a bar graph for the current day and highlights the current hour.
+
+This card is designed for users with a fixed-term Valtti-Electricity contract who want to monitor hourly spot electricity prices. It presents the prices as a bar chart, allowing for easy assessment of price dynamics throughout the day.
+
+![Oma Helen integration example](SpotPricesCard.png)
+
+Lovelace Card::
+```yml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Spot prices
+graph_span: 24h
+span:
+  start: day
+series:
+  - entity: sensor.helen_exchange_electricity_hourly_prices
+    type: column
+    name: Positive effect
+    stroke_width: 9
+    data_generator: |
+      let data = [];
+      let hourlyPrices = entity.attributes.hourly_prices;
+      if (hourlyPrices) {
+        for (let i = 0; i <= 23; i++) {
+          let price = hourlyPrices[i.toString()];
+          if (price !== undefined && price !== null && price < 8) { 
+            data.push([new Date().setHours(i, -1, 0, 0), price]);
+          } else {
+            data.push([new Date().setHours(i, 0, 0, 0), null]); 
+          }
+        }
+      }
+      return data;
+    color: "#008000"
+  - entity: sensor.helen_exchange_electricity_hourly_prices
+    type: column
+    name: Negative effect
+    stroke_width: 9
+    data_generator: |
+      let data = [];
+      let hourlyPrices = entity.attributes.hourly_prices;
+      if (hourlyPrices) {
+        for (let i = 0; i <= 23; i++) {
+          let price = hourlyPrices[i.toString()];
+          if (price !== undefined && price !== null && price >= 8) {
+            data.push([new Date().setHours(i, -18, 0, 0), price]);
+          } else {
+            data.push([new Date().setHours(i, 0, 0, 0), null]); 
+          }
+        }
+      }
+      return data;
+    color: "#FF0000"
+  - entity: sensor.helen_exchange_electricity_hourly_prices
+    type: column
+    name: Current hour
+    data_generator: |
+      let data = [];
+      let hourlyPrices = entity.attributes.hourly_prices;
+      let currentHour = new Date().getHours();
+      if (hourlyPrices) {
+        let price = hourlyPrices[currentHour.toString()];
+          if (price !== undefined && price !== null) {
+            data.push([new Date().setHours(currentHour, -30, 0, 0), price]);
+          } else {
+            data.push([new Date().setHours(currentHour, 0, 0, 0), null]);
+          }
+      }
+      return data;
+    color: black
+yaxis:
+  - id: price
+    min: 0
+    decimals: 2
+    apex_config:
+      tickAmount: 10
+apex_config:
+  xaxis:
+    type: datetime
+    labels:
+      format: H
+    tickAmount: 23
+    tickPlacement: "on"
+  chart:
+    type: bar
+    height: 350
+  plotOptions:
+    bar:
+      horizontal: false
+      columnWidth: 100%
+  legend:
+    show: false
+```

@@ -1,6 +1,10 @@
 from datetime import date, datetime, timedelta
 import logging
 import math
+import re
+import json
+import requests
+from requests.exceptions import RequestException
 from typing import Any, Dict, Optional
 
 from dateutil.relativedelta import relativedelta
@@ -81,6 +85,9 @@ STATE_ATTR_PRICE_NEXT_MONTH = "price_next_month"
 STATE_ATTR_FIXED_UNIT_PRICE = "fixed_unit_price"
 STATE_ATTR_FIXED_UNIT_PRICE_UNIT_OF_MEASUREMENT = "fixed_unit_price_unit_of_measurement"
 
+#hourly exchange
+STATE_ATTR_HOURLY_PRICES = "hourly_prices"
+
 
 def setup_platform(
     hass: HomeAssistant,
@@ -131,6 +138,11 @@ def setup_platform(
                 credentials,
                 default_base_price,
                 delivery_site_id,
+            )
+        )
+        entities.append(  
+            HelenExchangeElectricityHourly(
+                helen_price_client
             )
         )
     elif contract_type == "SMART_GUARANTEE":
@@ -813,3 +825,96 @@ class HelenMonthlyConsumption(SensorEntity):
             self._api_client
         )
         self._api_client.close()
+
+
+class HelenExchangeElectricityHourly(SensorEntity):
+    _attr_name = "Helen Exchange Electricity Hourly Prices"
+    _attr_icon = "mdi:currency-eur"
+    _attr_unit_of_measurement = "c/kWh"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    HTTP_READ_TIMEOUT = 10
+
+    def __init__(self, helen_price_client: HelenPriceClient):
+        super().__init__()
+        self.id = "helen_exchange_electricity_hourly"
+        self._price_client = helen_price_client
+        self._state = STATE_UNAVAILABLE
+        self.hourly_prices: Dict[int, Optional[float]] = {}
+
+    @property
+    def unique_id(self) -> str:
+        return self.id
+
+    @property
+    def state(self) -> Optional[float]:
+        return self._state
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            STATE_ATTR_HOURLY_PRICES: self.hourly_prices,
+        }
+
+    def update(self):
+        try:
+            response = requests.get(
+                self._price_client.EXCHANGE_ELECTRICITY_URL,
+                timeout=self.HTTP_READ_TIMEOUT,
+            )
+            response.raise_for_status()
+            response_text = response.text
+
+            match = re.search(
+                r"electricityPriceBlock\.todayData\.seriesData\s*=\s*\[\s*\{.*?data:\s*(?P<data>\[\[.*?]])",
+                response_text,
+                re.DOTALL | re.MULTILINE
+            )
+            if match:
+                data_str = match.group("data")
+                data_str = data_str.replace("null", "None").replace(" ", "")
+
+                try:
+                    data_list = json.loads(data_str)
+                except json.JSONDecodeError as e:
+                    _LOGGER.error(f"Error decoding JSON: {e}, data_str: {data_str}")
+                    self.hourly_prices = {}
+                    self._state = STATE_UNAVAILABLE
+                    return
+
+                self.hourly_prices = {}
+
+                for item in data_list:
+                    if isinstance(item, list) and len(item) == 2:
+                        try:
+                            hour = int(item[0])
+                            price = float(item[1]) if item[1] is not None else None
+                            self.hourly_prices[hour] = price
+                        except (TypeError, ValueError):
+                            _LOGGER.warning(f"Invalid price data: {item}")
+
+                    else:
+                         _LOGGER.warning(f"Invalid data format: {item}")
+
+
+                current_hour = datetime.now().hour
+                current_price = self.hourly_prices.get(current_hour)
+
+                if current_price is not None:
+                    self._state = current_price
+                else:
+                    self._state = STATE_UNAVAILABLE
+            else:
+                _LOGGER.error("Could not find hourly price data in Helen's response.")
+                self.hourly_prices = {}
+                self._state = STATE_UNAVAILABLE
+
+        except requests.RequestException as e:
+            _LOGGER.error(f"Error fetching hourly prices: {e}")
+            self.hourly_prices = {}
+            self._state = STATE_UNAVAILABLE
+        except Exception as e:
+            _LOGGER.error(f"Error fetching hourly prices: {e}")
+            self.hourly_prices = {}
+            self._state = STATE_UNAVAILABLE

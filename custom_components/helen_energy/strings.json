@@ -1,0 +1,40 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Connect to Helen Energy",
+                "description": "Enter your Helen Energy credentials to monitor your electricity consumption and costs",
+                "data": {
+                    "username": "Username",
+                    "password": "Password",
+                    "vat": "VAT percentage (default: 24%)",
+                    "contract_type": "Contract type",
+                    "default_unit_price": "Default unit price (c/kWh, optional)",
+                    "default_base_price": "Default base price (EUR/month, optional)",
+                    "delivery_site_id": "Delivery site ID (optional)",
+                    "include_transfer_costs": "Include transfer costs"
+                },
+                "data_description": {
+                    "default_unit_price": "Set a default unit price if you want to override the price from Helen",
+                    "default_base_price": "Set a default base price if you want to override the price from Helen",
+                    "delivery_site_id": "If you have multiple delivery sites, enter the ID of the site you want to monitor",
+                    "include_transfer_costs": "Include electricity transfer costs in the total cost calculation",
+                    "contract_type": "Select your Helen contract type"
+                }
+            },
+            "reauth_confirm": {
+                "title": "Reauthenticate with Helen Energy",
+                "description": "Please enter your password again to reauthenticate with Helen Energy"
+            }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect",
+            "invalid_auth": "Invalid authentication",
+            "unknown": "Unexpected error"
+        },
+        "abort": {
+            "already_configured": "Account is already configured",
+            "reauth_successful": "Reauthentication was successful"
+        }
+    }
+}

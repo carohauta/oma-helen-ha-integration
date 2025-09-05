@@ -15,8 +15,8 @@ from .const import (
     CONF_DEFAULT_BASE_PRICE,
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
+    CONF_FIXED_PRICE,
     CONF_VAT,
-    CONF_CONTRACT_TYPE,
     CONF_INCLUDE_TRANSFER_COSTS,
     DOMAIN,
 )
@@ -50,7 +50,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 margin = await self.hass.async_add_executor_job(
                     lambda: self.price_client.get_exchange_prices().margin
                 )
-                self.api_client = HelenApiClient(user_input[CONF_VAT], margin)
+                self.api_client = HelenApiClient(user_input[CONF_VAT] / 100, margin)
 
                 # Test authentication
                 await self.hass.async_add_executor_job(
@@ -59,17 +59,26 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input["password"],
                 )
 
-                # Create unique ID from username
-                unique_id = user_input["username"].lower()
+                # Create unique ID from username and delivery site ID (or timestamp)
+                if "delivery_site_id" in user_input:
+                    unique_id = f"{user_input['username'].lower()}_{user_input['delivery_site_id']}"
+                else:
+                    from time import time
+                    unique_id = f"{user_input['username'].lower()}_{int(time())}"
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
+
+                # Create entry title
+                title = "Helen Energy"
+                if "delivery_site_id" in user_input:
+                    title = f"{title} - {user_input['delivery_site_id']}"
+                title = f"{title} ({user_input['username']})"
 
                 # Create entry data
                 data = {
                     CONF_USERNAME: user_input["username"],
                     CONF_PASSWORD: user_input["password"],
                     CONF_VAT: user_input["vat"],
-                    CONF_CONTRACT_TYPE: user_input["contract_type"],
                 }
 
                 # Add optional parameters if provided
@@ -82,6 +91,10 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if "include_transfer_costs" in user_input:
                     data[CONF_INCLUDE_TRANSFER_COSTS] = user_input[
                         "include_transfer_costs"
+                    ]
+                if "is_fixed_price" in user_input:
+                    data[CONF_FIXED_PRICE] = user_input[
+                        "is_fixed_price"
                     ]
 
                 return self.async_create_entry(
@@ -97,14 +110,6 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if self.api_client:
                     self.api_client.close()
 
-        # Define contract type options
-        contract_types = {
-            "MARKET": "Market price",
-            "EXCHANGE": "Exchange price",
-            "SMART_GUARANTEE": "Smart Guarantee",
-            "FIXED": "Fixed price",
-        }
-
         data_schema = self.add_suggested_values_to_schema(
             vol.Schema(
                 {
@@ -113,7 +118,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required("vat", default=25.5): vol.All(
                         vol.Coerce(float), vol.Range(min=0, max=100)
                     ),
-                    vol.Required("contract_type"): vol.In(contract_types),
+                    vol.Optional("is_fixed_price", default=False): bool,
                     vol.Optional("default_unit_price"): vol.All(
                         vol.Coerce(float), vol.Range(min=0)
                     ),
@@ -127,13 +132,10 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user_input or {},
         )
 
-        placeholders = {"contract_types": ", ".join(contract_types.values())}
-
         return self.async_show_form(
             step_id="user",
             data_schema=data_schema,
-            errors=errors,
-            description_placeholders=placeholders,
+            errors=errors
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
@@ -157,7 +159,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 margin = await self.hass.async_add_executor_job(
                     lambda: self.price_client.get_exchange_prices().margin
                 )
-                self.api_client = HelenApiClient(entry.data[CONF_VAT], margin)
+                self.api_client = HelenApiClient(entry.data[CONF_VAT] / 100, margin)
 
                 # Test authentication
                 await self.hass.async_add_executor_job(

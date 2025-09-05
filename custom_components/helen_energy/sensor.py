@@ -29,7 +29,7 @@ from .const import (
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
     CONF_VAT,
-    CONF_CONTRACT_TYPE,
+    CONF_FIXED_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
 )
 from helenservice.price_client import HelenPriceClient
@@ -112,6 +112,9 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 "contract_base_price": await self.hass.async_add_executor_job(
                     self.api_client.get_contract_base_price
                 ),
+                "contract_type": await self.hass.async_add_executor_job(
+                    self.api_client.get_contract_type
+                ),
             }
 
             # Get prices based on contract type
@@ -190,8 +193,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up the Helen Energy sensors from a config entry."""
     username = config_entry.data[CONF_USERNAME]
     password = config_entry.data[CONF_PASSWORD]
-    vat = config_entry.data[CONF_VAT]
-    contract_type = config_entry.data[CONF_CONTRACT_TYPE]
+    vat = config_entry.data[CONF_VAT] / 100
+    is_fixed_price = config_entry.data.get(CONF_FIXED_PRICE, False)
     default_unit_price = config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)
     default_base_price = config_entry.data.get(CONF_DEFAULT_BASE_PRICE)
     include_transfer_costs = config_entry.data.get(CONF_INCLUDE_TRANSFER_COSTS)
@@ -216,9 +219,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     # Do first data update
     await coordinator.async_config_entry_first_refresh()
 
+    contract_type = coordinator.data.get("contract_type")
+
     entities = []
 
-    if contract_type == "MARKET":
+    if "MARK" in contract_type and is_fixed_price is False:
         entities.append(
             HelenMarketPriceElectricity(
                 coordinator,
@@ -226,10 +231,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 default_unit_price,
             )
         )
-    elif contract_type == "EXCHANGE":
+    elif "PORS" in contract_type and is_fixed_price is False:
         if default_unit_price is not None:
             _LOGGER.warning(
-                "Default unit price has been set but it will not be used with EXCHANGE contract type."
+                "Default unit price has been set but it will not be used with EXCHANGE contract type"
             )
         entities.append(
             HelenExchangeElectricity(
@@ -237,7 +242,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 default_base_price,
             )
         )
-    elif contract_type == "SMART_GUARANTEE":
+    elif "VALTTI" in contract_type and is_fixed_price is False:
         entities.append(
             HelenSmartGuarantee(
                 coordinator,
@@ -245,7 +250,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 default_unit_price,
             )
         )
-    elif contract_type == "FIXED":
+    elif "PERUS" in contract_type or "KAYTTO" in contract_type or is_fixed_price is True:
         entities.append(
             HelenFixedPriceElectricity(
                 coordinator,
@@ -254,7 +259,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             )
         )
 
-    if include_transfer_costs == True:
+    if include_transfer_costs is True:
         entities.append(HelenTransferPrice(coordinator))
 
     entities.append(HelenMonthlyConsumption(coordinator))

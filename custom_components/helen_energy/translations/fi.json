@@ -5,19 +5,21 @@
                 "data": {
                     "username": "Käyttäjätunnus",
                     "password": "Salasana",
-                    "vat": "ALV-prosentti (oletus: 24%)",
+                    "vat": "ALV-prosentti (oletus: 25.5%)",
                     "contract_type": "Sopimustyyppi",
-                    "default_unit_price": "Oletusyksikköhinta (c/kWh, valinnainen)",
-                    "default_base_price": "Oletusperusmaksu (EUR/kk, valinnainen)",
+                    "default_unit_price": "Yliaja yksikköhinta (c/kWh, valinnainen)",
+                    "default_base_price": "Yliaja perusmaksu (EUR/kk, valinnainen)",
                     "delivery_site_id": "Käyttöpaikan tunnus (valinnainen)",
-                    "include_transfer_costs": "Sisällytä siirtomaksut"
+                    "include_transfer_costs": "Siirtomaksut",
+                    "is_fixed_price": "Kiinteä hinta"
                 },
                 "data_description": {
-                    "default_unit_price": "Aseta oletusyksikköhinta, jos haluat ohittaa Helenin hinnan",
-                    "default_base_price": "Aseta oletusperusmaksu, jos haluat ohittaa Helenin perusmaksun",
+                    "default_unit_price": "Aseta yksikköhinta, jos haluat ohittaa Helenin hinnan",
+                    "default_base_price": "Aseta perusmaksu, jos haluat ohittaa Helenin perusmaksun",
                     "delivery_site_id": "Jos sinulla on useita käyttöpaikkoja, syötä seurattavan käyttöpaikan tunnus",
-                    "include_transfer_costs": "Sisällytä sähkönsiirtomaksut kokonaiskustannuslaskelmaan",
-                    "contract_type": "Valitse Helen-sopimustyyppisi: Markkinahinta, Pörssihinnoiteltu, Smart Guarantee tai Kiinteähintainen"
+                    "include_transfer_costs": "Valitse, jos halua seurata myös sähkönsiirtokuluja",
+                    "contract_type": "Valitse Helen-sopimustyyppisi: Markkinahinta, Pörssihinnoiteltu, Smart Guarantee tai Kiinteähintainen",
+                    "is_fixed_price": "Valitse, jos haluat pakottaa kiinteähintaisen sopimustyypin. Esimerkiksi, jos sinulla on sopimus, jota ei vielä tueta"
                 }
             },
             "reauth_confirm": {

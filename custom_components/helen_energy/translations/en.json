@@ -7,19 +7,21 @@
                 "data": {
                     "username": "Username",
                     "password": "Password",
-                    "vat": "VAT percentage (default: 24%)",
+                    "vat": "VAT percentage (default: 25.5%)",
                     "contract_type": "Contract type",
-                    "default_unit_price": "Default unit price (c/kWh, optional)",
-                    "default_base_price": "Default base price (EUR/month, optional)",
+                    "default_unit_price": "Override unit price (c/kWh, optional)",
+                    "default_base_price": "Override base price (EUR/month, optional)",
                     "delivery_site_id": "Delivery site ID (optional)",
-                    "include_transfer_costs": "Include transfer costs"
+                    "include_transfer_costs": "Transfer costs",
+                    "is_fixed_price": "Fixed price"
                 },
                 "data_description": {
-                    "default_unit_price": "Set a default unit price if you want to override the price from Helen",
-                    "default_base_price": "Set a default base price if you want to override the price from Helen",
+                    "default_unit_price": "Set a unit price if you want to override the price from Helen",
+                    "default_base_price": "Set a base price if you want to override the price from Helen",
                     "delivery_site_id": "If you have multiple delivery sites, enter the ID of the site you want to monitor",
-                    "include_transfer_costs": "Include electricity transfer costs in the total cost calculation",
-                    "contract_type": "Select your Helen contract type"
+                    "include_transfer_costs": "Check, if you want to track the transfer costs",
+                    "contract_type": "Select your Helen contract type",
+                    "is_fixed_price": "Check, if you want to force a fixed price contract type. For example, if you have a contract that is not yet supported"
                 }
             },
             "reauth_confirm": {

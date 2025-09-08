@@ -28,9 +28,9 @@
             }
         },
         "error": {
-            "cannot_connect": "Yhteyden muodostaminen epäonnistui",
-            "invalid_auth": "Virheellinen tunnistautuminen",
-            "unknown": "Odottamaton virhe"
+            "cannot_connect": "Yhteys Helen Energyyn epäonnistui. Tarkista internet-yhteytesi ja yritä uudelleen. Jos ongelma jatkuu, palvelu saattaa olla tilapäisesti pois käytöstä.",
+            "invalid_auth": "Virheellinen käyttäjätunnus tai salasana. Tarkista tunnukset ja yritä uudelleen.",
+            "unknown": "Odottamaton virhe tapahtui. Tarkista lokit saadaksesi lisätietoja."
         },
         "abort": {
             "already_configured": "Tili on jo määritetty",

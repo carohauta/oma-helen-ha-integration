@@ -22,7 +22,7 @@ from .const import (
 )
 from helenservice.api_client import HelenApiClient
 from helenservice.price_client import HelenPriceClient
-from helenservice.api_exceptions import InvalidApiResponseException
+from helenservice.api_exceptions import HelenAuthenticationException
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,11 +99,18 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 return self.async_create_entry(title=title, data=data)
 
-            except InvalidApiResponseException:
+            except HelenAuthenticationException as ex:
+                _LOGGER.error("Authentication failed: %s", ex)
                 errors["base"] = "invalid_auth"
+            except TimeoutError:
+                _LOGGER.error("Connection to Helen Energy timed out")
+                errors["base"] = "cannot_connect"
+            except ConnectionError:
+                _LOGGER.error("Failed to connect to Helen Energy")
+                errors["base"] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+                _LOGGER.exception("Unexpected error while setting up Helen Energy")
+                errors["base"] = "cannot_connect"
             finally:
                 if self.api_client:
                     self.api_client.close()
@@ -171,11 +178,18 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
-            except InvalidApiResponseException:
+            except HelenAuthenticationException as ex:
+                _LOGGER.error("Authentication failed during reauth: %s", ex)
                 errors["base"] = "invalid_auth"
+            except TimeoutError:
+                _LOGGER.error("Connection to Helen Energy timed out during reauth")
+                errors["base"] = "cannot_connect"
+            except ConnectionError:
+                _LOGGER.error("Failed to connect to Helen Energy during reauth")
+                errors["base"] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+                _LOGGER.exception("Unexpected error during Helen Energy reauth")
+                errors["base"] = "cannot_connect"
             finally:
                 if self.api_client:
                     self.api_client.close()

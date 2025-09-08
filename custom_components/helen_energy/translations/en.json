@@ -30,9 +30,9 @@
             }
         },
         "error": {
-            "cannot_connect": "Failed to connect",
-            "invalid_auth": "Invalid authentication",
-            "unknown": "Unexpected error"
+            "cannot_connect": "Failed to connect to Helen Energy. Please check your internet connection and try again. If the problem persists, the service might be temporarily unavailable.",
+            "invalid_auth": "Invalid username or password. Please check your credentials and try again.",
+            "unknown": "An unexpected error occurred. Please check the logs for more details."
         },
         "abort": {
             "already_configured": "Account is already configured",

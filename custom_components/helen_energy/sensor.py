@@ -13,11 +13,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
     SensorEntity,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_PASSWORD,
     CONF_USERNAME,
     UnitOfEnergy,
 )
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -70,6 +72,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
     def __init__(
         self,
         hass: HomeAssistant,
+        config_entry: ConfigEntry,
         helen_api_client: HelenApiClient,
         helen_price_client: HelenPriceClient,
         credentials: dict,
@@ -83,6 +86,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             name="Helen Energy",
             update_interval=SCAN_INTERVAL,
         )
+        self.config_entry = config_entry
         self.api_client = helen_api_client
         self.price_client = helen_price_client
         self.credentials = credentials
@@ -110,7 +114,9 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 ),
                 "transfer_costs": await get_transfer_price_total_for_current_month(
                     self.hass, self.api_client
-                ) if self.include_transfer_costs else 0.0,
+                )
+                if self.include_transfer_costs
+                else 0.0,
                 "contract_base_price": await self.hass.async_add_executor_job(
                     self.api_client.get_contract_base_price
                 ),
@@ -186,7 +192,14 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             return data
 
         except InvalidApiResponseException as err:
+            if "authentication" in str(err).lower():
+                # Trigger reauth if it's an auth error
+                from homeassistant.exceptions import ConfigEntryAuthFailed
+
+                raise ConfigEntryAuthFailed from err
             raise UpdateFailed(f"Error communicating with Helen API: {err}")
+        except Exception as err:
+            raise UpdateFailed(f"Unexpected error: {err}") from err
         finally:
             self.api_client.close()
 
@@ -212,6 +225,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
     coordinator = HelenDataCoordinator(
         hass,
+        config_entry,
         helen_api_client,
         helen_price_client,
         credentials,
@@ -253,7 +267,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 default_unit_price,
             )
         )
-    elif "PERUS" in contract_type or "KAYTTO" in contract_type or is_fixed_price is True:
+    elif (
+        "PERUS" in contract_type or "KAYTTO" in contract_type or is_fixed_price is True
+    ):
         entities.append(
             HelenFixedPriceElectricity(
                 coordinator,
@@ -371,25 +387,17 @@ class HelenMarketPriceElectricity(CoordinatorEntity, Entity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self.id = "helen_market_price_electricity"
-        self._name = "Helen Market Price Electricity"
+        self._attr_unique_id = (
+            f"{coordinator.config_entry.entry_id}_market_price_electricity"
+        )
+        self._attr_name = "Helen Market Price Electricity"
         self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self.id
 
     @property
     def state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         return self.attrs
-
-    @property
-    def name(self) -> str:
-        """Return the name of the entity."""
-        return self._name
 
     @property
     def state(self) -> str | None:
@@ -470,24 +478,16 @@ class HelenExchangeElectricity(CoordinatorEntity, Entity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self.id = "helen_exchange_electricity"
-        self._name = "Helen Exchange Electricity"
+        self._attr_unique_id = (
+            f"{coordinator.config_entry.entry_id}_exchange_electricity"
+        )
+        self._attr_name = "Helen Exchange Electricity"
         self._default_base_price = default_base_price
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self.id
 
     @property
     def state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         return self.attrs
-
-    @property
-    def name(self) -> str:
-        """Return the name of the entity."""
-        return self._name
 
     @property
     def state(self) -> str | None:
@@ -546,25 +546,15 @@ class HelenSmartGuarantee(CoordinatorEntity, Entity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self.id = "helen_smart_guarantee"
-        self._name = "Helen Smart Guarantee"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_smart_guarantee"
+        self._attr_name = "Helen Smart Guarantee"
         self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self.id
 
     @property
     def state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         return self.attrs
-
-    @property
-    def name(self) -> str:
-        """Return the name of the entity."""
-        return self._name
 
     @property
     def state(self) -> str | None:
@@ -646,25 +636,17 @@ class HelenFixedPriceElectricity(CoordinatorEntity, Entity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self.id = "helen_fixed_price_electricity"
-        self._name = "Helen Fixed Price Electricity"
+        self._attr_unique_id = (
+            f"{coordinator.config_entry.entry_id}_fixed_price_electricity"
+        )
+        self._attr_name = "Helen Fixed Price Electricity"
         self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self.id
 
     @property
     def state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         return self.attrs
-
-    @property
-    def name(self) -> str:
-        """Return the name of the entity."""
-        return self._name
 
     @property
     def state(self) -> str | None:
@@ -722,23 +704,13 @@ class HelenTransferPrice(CoordinatorEntity, Entity):
     def __init__(self, coordinator: HelenDataCoordinator) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self.id = "helen_transfer_costs"
-        self._name = "Helen Transfer Costs"
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self.id
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_transfer_costs"
+        self._attr_name = "Helen Transfer Costs"
 
     @property
     def state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         return self.attrs
-
-    @property
-    def name(self) -> str:
-        """Return the name of the entity."""
-        return self._name
 
     @property
     def state(self) -> str | None:
@@ -754,17 +726,14 @@ class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: HelenDataCoordinator):
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self.id = "helen_monthly_consumption"
+        self._attr_unique_id = (
+            f"{coordinator.config_entry.entry_id}_monthly_consumption"
+        )
         self._attr_name = "Helen Monthly Consumption"
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_icon = "mdi:home-lightning-bolt"
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self.id
 
     @property
     def native_value(self) -> float:

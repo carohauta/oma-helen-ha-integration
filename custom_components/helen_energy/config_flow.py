@@ -64,6 +64,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     unique_id = f"{user_input['username'].lower()}_{user_input['delivery_site_id']}"
                 else:
                     from time import time
+
                     unique_id = f"{user_input['username'].lower()}_{int(time())}"
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
@@ -71,8 +72,9 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Create entry title
                 title = "Helen Energy"
                 if "delivery_site_id" in user_input:
-                    title = f"{title} - {user_input['delivery_site_id']}"
-                title = f"{title} ({user_input['username']})"
+                    title = f"{title} ({user_input['delivery_site_id']})"
+                else:
+                    title = f"{title} ({user_input['username']})"
 
                 # Create entry data
                 data = {
@@ -93,13 +95,9 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         "include_transfer_costs"
                     ]
                 if "is_fixed_price" in user_input:
-                    data[CONF_FIXED_PRICE] = user_input[
-                        "is_fixed_price"
-                    ]
+                    data[CONF_FIXED_PRICE] = user_input["is_fixed_price"]
 
-                return self.async_create_entry(
-                    title=f"Helen Energy ({user_input[CONF_USERNAME]})", data=data
-                )
+                return self.async_create_entry(title=title, data=data)
 
             except InvalidApiResponseException:
                 errors["base"] = "invalid_auth"
@@ -133,9 +131,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=data_schema,
-            errors=errors
+            step_id="user", data_schema=data_schema, errors=errors
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:

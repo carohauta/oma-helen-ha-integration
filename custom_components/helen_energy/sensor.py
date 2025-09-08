@@ -74,6 +74,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         helen_price_client: HelenPriceClient,
         credentials: dict,
         delivery_site_id: str = None,
+        include_transfer_costs: bool = False,
     ):
         """Initialize the coordinator."""
         super().__init__(
@@ -86,6 +87,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         self.price_client = helen_price_client
         self.credentials = credentials
         self.delivery_site_id = delivery_site_id
+        self.include_transfer_costs = include_transfer_costs
 
     async def _async_update_data(self):
         """Fetch data from Helen API."""
@@ -108,7 +110,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 ),
                 "transfer_costs": await get_transfer_price_total_for_current_month(
                     self.hass, self.api_client
-                ),
+                ) if self.include_transfer_costs else 0.0,
                 "contract_base_price": await self.hass.async_add_executor_job(
                     self.api_client.get_contract_base_price
                 ),
@@ -214,6 +216,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         helen_price_client,
         credentials,
         delivery_site_id,
+        include_transfer_costs,
     )
 
     # Do first data update

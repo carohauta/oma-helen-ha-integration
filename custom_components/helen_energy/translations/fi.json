@@ -30,6 +30,7 @@
         "error": {
             "cannot_connect": "Yhteys Helen Energyyn epäonnistui. Tarkista internet-yhteytesi ja yritä uudelleen. Jos ongelma jatkuu, palvelu saattaa olla tilapäisesti pois käytöstä.",
             "invalid_auth": "Virheellinen käyttäjätunnus tai salasana. Tarkista tunnukset ja yritä uudelleen.",
+            "invalid_delivery_site_id": "Virheellinen käyttöpaikan tunnus. Tarkista, että tunnus on olemassa.",
             "unknown": "Odottamaton virhe tapahtui. Tarkista lokit saadaksesi lisätietoja."
         },
         "abort": {

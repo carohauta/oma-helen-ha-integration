@@ -32,6 +32,7 @@
         "error": {
             "cannot_connect": "Failed to connect to Helen Energy. Please check your internet connection and try again. If the problem persists, the service might be temporarily unavailable.",
             "invalid_auth": "Invalid username or password. Please check your credentials and try again.",
+            "invalid_delivery_site_id": "Invalid delivery site ID. Please check that the ID exists.",
             "unknown": "An unexpected error occurred. Please check the logs for more details."
         },
         "abort": {

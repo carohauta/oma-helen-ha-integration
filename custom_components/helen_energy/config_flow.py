@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from time import time
+
 
 import voluptuous as vol
 
@@ -22,7 +24,10 @@ from .const import (
 )
 from helenservice.api_client import HelenApiClient
 from helenservice.price_client import HelenPriceClient
-from helenservice.api_exceptions import HelenAuthenticationException
+from helenservice.api_exceptions import (
+    HelenAuthenticationException,
+    InvalidDeliverySiteException,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,22 +64,22 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input["password"],
                 )
 
+                title = "Helen Energy"
+
                 # Create unique ID from username and delivery site ID (or timestamp)
                 if "delivery_site_id" in user_input:
+                    # Select and validate the delivery site id
+                    await self.hass.async_add_executor_job(
+                        self.api_client.select_delivery_site_if_valid_id,
+                        user_input["delivery_site_id"],
+                    )
                     unique_id = f"{user_input['username'].lower()}_{user_input['delivery_site_id']}"
-                else:
-                    from time import time
-
-                    unique_id = f"{user_input['username'].lower()}_{int(time())}"
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
-
-                # Create entry title
-                title = "Helen Energy"
-                if "delivery_site_id" in user_input:
                     title = f"{title} ({user_input['delivery_site_id']})"
                 else:
+                    unique_id = f"{user_input['username'].lower()}_{int(time())}"
                     title = f"{title} ({user_input['username']})"
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
 
                 # Create entry data
                 data = {
@@ -102,6 +107,9 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except HelenAuthenticationException as ex:
                 _LOGGER.error("Authentication failed: %s", ex)
                 errors["base"] = "invalid_auth"
+            except InvalidDeliverySiteException as ex:
+                _LOGGER.error("Setting delivery site failed: %s", ex)
+                errors["base"] = "invalid_delivery_site_id"
             except TimeoutError:
                 _LOGGER.error("Connection to Helen Energy timed out")
                 errors["base"] = "cannot_connect"
@@ -111,9 +119,6 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected error while setting up Helen Energy")
                 errors["base"] = "cannot_connect"
-            finally:
-                if self.api_client:
-                    self.api_client.close()
 
         data_schema = self.add_suggested_values_to_schema(
             vol.Schema(
@@ -121,14 +126,20 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required("username"): str,
                     vol.Required("password"): str,
                     vol.Required("vat", default=25.5): vol.All(
-                        vol.Coerce(float), vol.Range(min=0, max=100)
+                        vol.Coerce(float),
+                        vol.Range(min=0.0, max=100.0),
+                        msg="VAT percentage must be between 0 and 100",
                     ),
                     vol.Optional("is_fixed_price", default=False): bool,
                     vol.Optional("default_unit_price"): vol.All(
-                        vol.Coerce(float), vol.Range(min=0)
+                        vol.Coerce(float),
+                        vol.Range(min=0.00001),  # Ensure greater than 0
+                        msg="Unit price must be greater than 0",
                     ),
                     vol.Optional("default_base_price"): vol.All(
-                        vol.Coerce(float), vol.Range(min=0)
+                        vol.Coerce(float),
+                        vol.Range(min=0.00001),  # Ensure greater than 0
+                        msg="Base price must be greater than 0",
                     ),
                     vol.Optional("delivery_site_id"): str,
                     vol.Optional("include_transfer_costs", default=False): bool,
@@ -190,9 +201,6 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected error during Helen Energy reauth")
                 errors["base"] = "cannot_connect"
-            finally:
-                if self.api_client:
-                    self.api_client.close()
 
         return self.async_show_form(
             step_id="reauth_confirm",

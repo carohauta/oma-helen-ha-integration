@@ -1,14 +1,20 @@
+"""Helen Energy sensor platform."""
+
+from __future__ import annotations
+
 from datetime import date, timedelta
 import logging
 import math
 from typing import Any
 
 from dateutil.relativedelta import relativedelta
-from helenservice.api_response import MeasurementResponse
+from helenservice.api_client import HelenApiClient
 from helenservice.api_exceptions import InvalidApiResponseException
-from homeassistant.core import HomeAssistant
+from helenservice.api_response import MeasurementResponse
+from helenservice.price_client import HelenPriceClient
+from helenservice.utils import get_month_date_range_by_date
+
 from homeassistant.components.sensor import (
-    SCAN_INTERVAL,
     SensorDeviceClass,
     SensorStateClass,
     SensorEntity,
@@ -19,13 +25,14 @@ from homeassistant.const import (
     CONF_USERNAME,
     UnitOfEnergy,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
     UpdateFailed,
 )
+
 from .const import (
     CONF_DEFAULT_BASE_PRICE,
     CONF_DEFAULT_UNIT_PRICE,
@@ -34,9 +41,6 @@ from .const import (
     CONF_FIXED_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
 )
-from helenservice.price_client import HelenPriceClient
-from helenservice.api_client import HelenApiClient
-from helenservice.utils import get_month_date_range_by_date
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=3)
@@ -75,10 +79,10 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         config_entry: ConfigEntry,
         helen_api_client: HelenApiClient,
         helen_price_client: HelenPriceClient,
-        credentials: dict,
-        delivery_site_id: str = None,
+        credentials: dict[str, str],
+        delivery_site_id: str | None = None,
         include_transfer_costs: bool = False,
-    ):
+    ) -> None:
         """Initialize the coordinator."""
         super().__init__(
             hass,
@@ -143,7 +147,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                     "current_month": getattr(prices, "current_month", None),
                     "next_month": getattr(prices, "next_month", None),
                 }
-            except Exception:
+            except (InvalidApiResponseException, AttributeError):
                 data["market_prices"] = None
 
             # Get exchange prices if needed
@@ -152,7 +156,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                     self.price_client.get_exchange_prices
                 )
                 data["exchange_prices"] = {"margin": exchange_prices.margin}
-            except Exception:
+            except (InvalidApiResponseException, AttributeError):
                 data["exchange_prices"] = None
 
             # Calculate spot price costs for exchange electricity
@@ -173,7 +177,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                     "current_month": math.ceil(current_month_cost),
                     "last_month": math.ceil(last_month_cost),
                 }
-            except Exception:
+            except InvalidApiResponseException:
                 data["exchange_costs"] = None
 
             # Calculate smart guarantee costs
@@ -186,25 +190,25 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 data["smart_guarantee"] = {
                     "current_month_impact": current_month_impact,
                 }
-            except Exception:
+            except InvalidApiResponseException:
                 data["smart_guarantee"] = None
-
-            return data
 
         except InvalidApiResponseException as err:
             if "authentication" in str(err).lower():
                 # Trigger reauth if it's an auth error
-                from homeassistant.exceptions import ConfigEntryAuthFailed
-
                 raise ConfigEntryAuthFailed from err
-            raise UpdateFailed(f"Error communicating with Helen API: {err}")
+            raise UpdateFailed(f"Error communicating with Helen API: {err}") from err
         except Exception as err:
             raise UpdateFailed(f"Unexpected error: {err}") from err
+        else:
+            return data
         finally:
             self.api_client.close()
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities
+) -> None:
     """Set up the Helen Energy sensors from a config entry."""
     username = config_entry.data[CONF_USERNAME]
     password = config_entry.data[CONF_PASSWORD]
@@ -233,59 +237,43 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         include_transfer_costs,
     )
 
-    # Do first data update
     await coordinator.async_config_entry_first_refresh()
 
     contract_type = coordinator.data.get("contract_type")
 
     entities = []
 
-    if "MARK" in contract_type and is_fixed_price is False:
-        entities.append(
-            HelenMarketPriceElectricity(
-                coordinator,
-                default_base_price,
-                default_unit_price,
-            )
-        )
-    elif "PORS" in contract_type and is_fixed_price is False:
-        if default_unit_price is not None:
-            _LOGGER.warning(
-                "Default unit price has been set but it will not be used with EXCHANGE contract type"
-            )
-        entities.append(
-            HelenExchangeElectricity(
-                coordinator,
-                default_base_price,
-            )
-        )
-    elif "VALTTI" in contract_type and is_fixed_price is False:
-        entities.append(
-            HelenSmartGuarantee(
-                coordinator,
-                default_base_price,
-                default_unit_price,
-            )
-        )
-    elif (
-        "PERUS" in contract_type or "KAYTTO" in contract_type or is_fixed_price is True
-    ):
+    # Add appropriate price sensor based on contract type
+    if is_fixed_price or "PERUS" in contract_type or "KAYTTO" in contract_type:
         entities.append(
             HelenFixedPriceElectricity(
-                coordinator,
-                default_base_price,
-                default_unit_price,
+                coordinator, default_base_price, default_unit_price
             )
         )
+    elif "MARK" in contract_type:
+        entities.append(
+            HelenMarketPriceElectricity(
+                coordinator, default_base_price, default_unit_price
+            )
+        )
+    elif "PORS" in contract_type:
+        if default_unit_price is not None:
+            _LOGGER.warning(
+                "Default unit price set but will not be used with EXCHANGE contract"
+            )
+        entities.append(HelenExchangeElectricity(coordinator, default_base_price))
+    elif "VALTTI" in contract_type:
+        entities.append(
+            HelenSmartGuarantee(coordinator, default_base_price, default_unit_price)
+        )
 
-    if include_transfer_costs is True:
+    # Add optional sensors
+    if include_transfer_costs:
         entities.append(HelenTransferPrice(coordinator))
 
     entities.append(HelenMonthlyConsumption(coordinator))
 
     async_add_entities(entities)
-
-    return True
 
 
 async def _login_helen_api_if_needed(
@@ -374,10 +362,51 @@ async def _get_average_daily_consumption_for_current_month(
     )
 
 
-class HelenMarketPriceElectricity(CoordinatorEntity, Entity):
-    """Helen market price electricity sensor."""
+class HelenBaseSensor(CoordinatorEntity, SensorEntity):
+    """Base class for Helen sensors."""
 
-    attrs: dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_icon = "mdi:currency-eur"
+
+    def __init__(
+        self,
+        coordinator: HelenDataCoordinator,
+        sensor_type: str,
+        name: str,
+        default_base_price: float | None = None,
+        default_unit_price: float | None = None,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{sensor_type}"
+        self._attr_name = name
+        self._default_base_price = default_base_price
+        self._default_unit_price = default_unit_price
+
+    def _get_base_price(self, data: dict[str, Any]) -> float:
+        """Get base price with override if set."""
+        if self._default_base_price is not None:
+            return self._default_base_price
+        return data.get("contract_base_price", 0)
+
+    def _get_unit_price(self, data: dict[str, Any]) -> float:
+        """Get unit price with override if set."""
+        if self._default_unit_price is not None:
+            return self._default_unit_price
+        return data.get("unit_price", 0)
+
+    def _get_consumption_attributes(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Get common consumption attributes."""
+        return {
+            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: data.get("current_month_consumption"),
+            STATE_ATTR_LAST_MONTH_CONSUMPTION: data.get("last_month_consumption"),
+            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: data.get("daily_average_consumption"),
+            STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
+        }
+
+
+class HelenMarketPriceElectricity(HelenBaseSensor):
+    """Helen market price electricity sensor."""
 
     def __init__(
         self,
@@ -386,28 +415,23 @@ class HelenMarketPriceElectricity(CoordinatorEntity, Entity):
         default_unit_price: float | None = None,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._attr_unique_id = (
-            f"{coordinator.config_entry.entry_id}_market_price_electricity"
+        super().__init__(
+            coordinator,
+            "market_price_electricity",
+            "Helen Market Price Electricity",
+            default_base_price,
+            default_unit_price,
         )
-        self._attr_name = "Helen Market Price Electricity"
-        self._default_base_price = default_base_price
-        self._default_unit_price = default_unit_price
 
     @property
-    def state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        return self.attrs
-
-    @property
-    def state(self) -> str | None:
+    def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
 
         data = self.coordinator.data
         market_prices = data.get("market_prices", {})
-        contract_base_price = data.get("contract_base_price", 0)
+        base_price = self._get_base_price(data)
         current_month_consumption = data.get("current_month_consumption", 0)
         daily_average_consumption = data.get("daily_average_consumption", 0)
 
@@ -419,32 +443,26 @@ class HelenMarketPriceElectricity(CoordinatorEntity, Entity):
         )
 
         current_month_cost_estimate = (
-            contract_base_price
+            base_price
             + (current_month_price * current_month_consumption)
             + (2 * daily_average_consumption * current_month_price)
         )
         return math.ceil(current_month_cost_estimate)
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if self.coordinator.data is None:
             return {}
 
         data = self.coordinator.data
         market_prices = data.get("market_prices", {})
-        contract_base_price = data.get("contract_base_price", 0)
+        base_price = self._get_base_price(data)
         last_month_consumption = data.get("last_month_consumption", 0)
 
         # Calculate last month total cost
         last_month_price = market_prices.get("last_month", 0) / 100
-        last_month_total_cost = (
-            last_month_price * last_month_consumption + contract_base_price
-        )
-
-        # Use default base price if set
-        if self._default_base_price is not None:
-            contract_base_price = self._default_base_price
+        last_month_total_cost = last_month_price * last_month_consumption + base_price
 
         # Use default unit price for current month if set
         current_month_price = (
@@ -453,23 +471,19 @@ class HelenMarketPriceElectricity(CoordinatorEntity, Entity):
             else market_prices.get("current_month")
         )
 
-        return {
-            STATE_ATTR_CONTRACT_BASE_PRICE: contract_base_price,
+        attributes = {
+            STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
             STATE_ATTR_LAST_MONTH_TOTAL_COST: last_month_total_cost,
-            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: data.get("current_month_consumption"),
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: last_month_consumption,
-            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: data.get("daily_average_consumption"),
             STATE_ATTR_PRICE_LAST_MONTH: market_prices.get("last_month"),
             STATE_ATTR_PRICE_CURRENT_MONTH: current_month_price,
             STATE_ATTR_PRICE_NEXT_MONTH: market_prices.get("next_month"),
-            STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
         }
+        attributes.update(self._get_consumption_attributes(data))
+        return attributes
 
 
-class HelenExchangeElectricity(CoordinatorEntity, Entity):
+class HelenExchangeElectricity(HelenBaseSensor):
     """Helen exchange electricity sensor."""
-
-    attrs: dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
 
     def __init__(
         self,
@@ -477,66 +491,53 @@ class HelenExchangeElectricity(CoordinatorEntity, Entity):
         default_base_price: float | None = None,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._attr_unique_id = (
-            f"{coordinator.config_entry.entry_id}_exchange_electricity"
+        super().__init__(
+            coordinator,
+            "exchange_electricity",
+            "Helen Exchange Electricity",
+            default_base_price,
         )
-        self._attr_name = "Helen Exchange Electricity"
-        self._default_base_price = default_base_price
 
     @property
-    def state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        return self.attrs
-
-    @property
-    def state(self) -> str | None:
+    def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
 
         data = self.coordinator.data
-        contract_base_price = data.get("contract_base_price", 0)
-        if self._default_base_price is not None:
-            contract_base_price = self._default_base_price
-
+        base_price = self._get_base_price(data)
         exchange_costs = data.get("exchange_costs")
+
         if not exchange_costs:
             return None
 
-        return str(exchange_costs["current_month"] + contract_base_price)
+        return exchange_costs["current_month"] + base_price
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if self.coordinator.data is None:
             return {}
 
         data = self.coordinator.data
-        contract_base_price = data.get("contract_base_price", 0)
-        if self._default_base_price is not None:
-            contract_base_price = self._default_base_price
-
+        base_price = self._get_base_price(data)
         exchange_costs = data.get("exchange_costs")
+
         if not exchange_costs:
-            return {}
+            return self._get_consumption_attributes(data)
 
-        last_month_total_cost = exchange_costs["last_month"] + contract_base_price
+        last_month_total_cost = exchange_costs["last_month"] + base_price
 
-        return {
-            STATE_ATTR_CONTRACT_BASE_PRICE: contract_base_price,
+        attributes = {
+            STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
             STATE_ATTR_LAST_MONTH_TOTAL_COST: last_month_total_cost,
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: data.get("last_month_consumption"),
-            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: data.get("current_month_consumption"),
-            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: data.get("daily_average_consumption"),
-            STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
         }
+        attributes.update(self._get_consumption_attributes(data))
+        return attributes
 
 
-class HelenSmartGuarantee(CoordinatorEntity, Entity):
+class HelenSmartGuarantee(HelenBaseSensor):
     """Helen smart guarantee sensor."""
-
-    attrs: dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
 
     def __init__(
         self,
@@ -545,19 +546,16 @@ class HelenSmartGuarantee(CoordinatorEntity, Entity):
         default_unit_price: float | None = None,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_smart_guarantee"
-        self._attr_name = "Helen Smart Guarantee"
-        self._default_base_price = default_base_price
-        self._default_unit_price = default_unit_price
+        super().__init__(
+            coordinator,
+            "smart_guarantee",
+            "Helen Smart Guarantee",
+            default_base_price,
+            default_unit_price,
+        )
 
     @property
-    def state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        return self.attrs
-
-    @property
-    def state(self) -> str | None:
+    def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
@@ -567,66 +565,49 @@ class HelenSmartGuarantee(CoordinatorEntity, Entity):
         if not smart_guarantee:
             return None
 
-        contract_base_price = data.get("contract_base_price", 0)
-        if self._default_base_price is not None:
-            contract_base_price = self._default_base_price
-
+        base_price = self._get_base_price(data)
         current_month_consumption = data.get("current_month_consumption", 0)
         current_month_impact = smart_guarantee["current_month_impact"]
-
-        # Get unit price
-        unit_price = data.get("unit_price", 0)
-        if self._default_unit_price is not None:
-            unit_price = self._default_unit_price
+        unit_price = self._get_unit_price(data)
 
         current_month_energy_price_with_impact = (
             unit_price + current_month_impact
         ) / 100
         current_month_total_cost = (
             current_month_consumption * current_month_energy_price_with_impact
-            + contract_base_price
+            + base_price
         )
 
-        return str(math.ceil(current_month_total_cost))
+        return math.ceil(current_month_total_cost)
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if self.coordinator.data is None:
             return {}
 
         data = self.coordinator.data
-        contract_base_price = data.get("contract_base_price", 0)
-        if self._default_base_price is not None:
-            contract_base_price = self._default_base_price
-
+        base_price = self._get_base_price(data)
         smart_guarantee = data.get("smart_guarantee")
+
         if not smart_guarantee:
-            return {}
+            return self._get_consumption_attributes(data)
 
-        # Get unit price
-        unit_price = data.get("unit_price", 0)
-        if self._default_unit_price is not None:
-            unit_price = self._default_unit_price
-
+        unit_price = self._get_unit_price(data)
         current_month_energy_price_with_impact = (
             unit_price + smart_guarantee["current_month_impact"]
         ) / 100
 
-        return {
-            STATE_ATTR_CONTRACT_BASE_PRICE: contract_base_price,
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: data.get("last_month_consumption"),
-            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: data.get("current_month_consumption"),
-            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: data.get("daily_average_consumption"),
+        attributes = {
+            STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
             STATE_ATTR_CURRENT_MONTH_PRICE_WITH_IMPACT: current_month_energy_price_with_impact,
-            STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
         }
+        attributes.update(self._get_consumption_attributes(data))
+        return attributes
 
 
-class HelenFixedPriceElectricity(CoordinatorEntity, Entity):
+class HelenFixedPriceElectricity(HelenBaseSensor):
     """Helen fixed price electricity sensor."""
-
-    attrs: dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
 
     def __init__(
         self,
@@ -635,71 +616,55 @@ class HelenFixedPriceElectricity(CoordinatorEntity, Entity):
         default_unit_price: float | None = None,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._attr_unique_id = (
-            f"{coordinator.config_entry.entry_id}_fixed_price_electricity"
+        super().__init__(
+            coordinator,
+            "fixed_price_electricity",
+            "Helen Fixed Price Electricity",
+            default_base_price,
+            default_unit_price,
         )
-        self._attr_name = "Helen Fixed Price Electricity"
-        self._default_base_price = default_base_price
-        self._default_unit_price = default_unit_price
 
     @property
-    def state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        return self.attrs
-
-    @property
-    def state(self) -> str | None:
+    def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
 
         data = self.coordinator.data
-        contract_base_price = data.get("contract_base_price", 0)
-        if self._default_base_price is not None:
-            contract_base_price = self._default_base_price
-
+        base_price = self._get_base_price(data)
         current_month_consumption = data.get("current_month_consumption", 0)
-        unit_price = data.get("unit_price", 0)
-        if self._default_unit_price is not None:
-            unit_price = self._default_unit_price
+        unit_price = self._get_unit_price(data)
 
         current_month_total_cost = (
-            current_month_consumption * unit_price / 100 + contract_base_price
+            current_month_consumption * unit_price / 100 + base_price
         )
 
         return math.ceil(current_month_total_cost)
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if self.coordinator.data is None:
             return {}
 
         data = self.coordinator.data
-        contract_base_price = data.get("contract_base_price", 0)
-        if self._default_base_price is not None:
-            contract_base_price = self._default_base_price
+        base_price = self._get_base_price(data)
+        unit_price = self._get_unit_price(data)
 
-        unit_price = data.get("unit_price", 0)
-        if self._default_unit_price is not None:
-            unit_price = self._default_unit_price
-
-        return {
-            STATE_ATTR_CONTRACT_BASE_PRICE: contract_base_price,
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: data.get("last_month_consumption"),
-            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: data.get("current_month_consumption"),
-            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: data.get("daily_average_consumption"),
+        attributes = {
+            STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
             STATE_ATTR_FIXED_UNIT_PRICE: unit_price,
-            STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
             STATE_ATTR_FIXED_UNIT_PRICE_UNIT_OF_MEASUREMENT: "c/kWh",
         }
+        attributes.update(self._get_consumption_attributes(data))
+        return attributes
 
 
-class HelenTransferPrice(CoordinatorEntity, Entity):
+class HelenTransferPrice(CoordinatorEntity, SensorEntity):
     """Helen transfer price sensor."""
 
-    attrs: dict[str, Any] = {"unit_of_measurement": "EUR", "icon": "mdi:currency-eur"}
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_icon = "mdi:currency-eur"
 
     def __init__(self, coordinator: HelenDataCoordinator) -> None:
         """Initialize the sensor."""
@@ -708,22 +673,17 @@ class HelenTransferPrice(CoordinatorEntity, Entity):
         self._attr_name = "Helen Transfer Costs"
 
     @property
-    def state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        return self.attrs
-
-    @property
-    def state(self) -> str | None:
+    def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
-        return str(self.coordinator.data.get("transfer_costs", 0))
+        return self.coordinator.data.get("transfer_costs", 0)
 
 
 class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
     """Helen monthly consumption sensor."""
 
-    def __init__(self, coordinator: HelenDataCoordinator):
+    def __init__(self, coordinator: HelenDataCoordinator) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._attr_unique_id = (

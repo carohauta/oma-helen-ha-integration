@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 from time import time
+from typing import Any
 
-
+from helenservice.api_client import HelenApiClient
+from helenservice.api_exceptions import (
+    HelenAuthenticationException,
+    InvalidDeliverySiteException,
+)
+from helenservice.price_client import HelenPriceClient
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
@@ -18,15 +23,9 @@ from .const import (
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
     CONF_FIXED_PRICE,
-    CONF_VAT,
     CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_VAT,
     DOMAIN,
-)
-from helenservice.api_client import HelenApiClient
-from helenservice.price_client import HelenPriceClient
-from helenservice.api_exceptions import (
-    HelenAuthenticationException,
-    InvalidDeliverySiteException,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +41,93 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.api_client: HelenApiClient | None = None
         self.price_client: HelenPriceClient | None = None
 
+    async def _create_api_client(self, vat: float) -> HelenApiClient:
+        """Create and initialize API client."""
+        if self.price_client is None:
+            self.price_client = HelenPriceClient()
+
+        margin = await self.hass.async_add_executor_job(
+            lambda: self.price_client.get_exchange_prices().margin
+        )
+        return HelenApiClient(vat / 100, margin)
+
+    async def _authenticate(self, username: str, password: str) -> None:
+        """Authenticate with Helen API."""
+        if self.api_client is None:
+            raise ValueError("API client not initialized")
+
+        await self.hass.async_add_executor_job(
+            self.api_client.login_and_init, username, password
+        )
+
+    def _create_unique_id_and_title(
+        self, username: str, delivery_site_id: str | None = None
+    ) -> tuple[str, str]:
+        """Create unique ID and title for the config entry."""
+        title = "Helen Energy"
+
+        if delivery_site_id:
+            unique_id = f"{username.lower()}_{delivery_site_id}"
+            title = f"{title} ({delivery_site_id})"
+        else:
+            unique_id = f"{username.lower()}_{int(time())}"
+            title = f"{title} ({username})"
+
+        return unique_id, title
+
+    def _build_entry_data(self, user_input: dict[str, Any]) -> dict[str, Any]:
+        """Build config entry data from user input."""
+        data = {
+            CONF_USERNAME: user_input["username"],
+            CONF_PASSWORD: user_input["password"],
+            CONF_VAT: user_input["vat"],
+        }
+
+        # Add optional parameters if provided
+        optional_fields = [
+            ("default_unit_price", CONF_DEFAULT_UNIT_PRICE),
+            ("default_base_price", CONF_DEFAULT_BASE_PRICE),
+            ("delivery_site_id", CONF_DELIVERY_SITE_ID),
+            ("include_transfer_costs", CONF_INCLUDE_TRANSFER_COSTS),
+            ("is_fixed_price", CONF_FIXED_PRICE),
+        ]
+
+        for input_key, config_key in optional_fields:
+            if input_key in user_input:
+                data[config_key] = user_input[input_key]
+
+        return data
+
+    def _handle_errors(self, exception: Exception) -> dict[str, str]:
+        """Handle exceptions and return appropriate error dict."""
+        if isinstance(exception, HelenAuthenticationException):
+            _LOGGER.error("Authentication failed: %s", exception)
+            return {"base": "invalid_auth"}
+
+        if isinstance(exception, InvalidDeliverySiteException):
+            _LOGGER.error("Setting delivery site failed: %s", exception)
+            return {"base": "invalid_delivery_site_id"}
+
+        if isinstance(exception, (TimeoutError, ConnectionError)):
+            error_type = (
+                "timed out" if isinstance(exception, TimeoutError) else "failed"
+            )
+            _LOGGER.error("Connection to Helen Energy %s", error_type)
+            return {"base": "cannot_connect"}
+
+        _LOGGER.exception("Unexpected error while setting up Helen Energy")
+        return {"base": "cannot_connect"}
+
+    async def _cleanup_resources(self) -> None:
+        """Clean up any initialized resources."""
+        if self.price_client is not None:
+            # PriceClient doesn't have async close method, just clear reference
+            self.price_client = None
+
+        if self.api_client is not None:
+            # HelenApiClient doesn't have async close method, just clear reference
+            self.api_client = None
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -50,77 +136,50 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                # Create API client and test connection
-                self.price_client = HelenPriceClient()
-                margin = await self.hass.async_add_executor_job(
-                    lambda: self.price_client.get_exchange_prices().margin
-                )
-                self.api_client = HelenApiClient(user_input[CONF_VAT] / 100, margin)
+                # Create API client and authenticate
+                self.api_client = await self._create_api_client(user_input[CONF_VAT])
+                await self._authenticate(user_input["username"], user_input["password"])
 
-                # Test authentication
-                await self.hass.async_add_executor_job(
-                    self.api_client.login_and_init,
-                    user_input["username"],
-                    user_input["password"],
-                )
-
-                title = "Helen Energy"
-
-                # Create unique ID from username and delivery site ID (or timestamp)
+                # Validate delivery site if provided
                 if "delivery_site_id" in user_input:
-                    # Select and validate the delivery site id
                     await self.hass.async_add_executor_job(
                         self.api_client.select_delivery_site_if_valid_id,
                         user_input["delivery_site_id"],
                     )
-                    unique_id = f"{user_input['username'].lower()}_{user_input['delivery_site_id']}"
-                    title = f"{title} ({user_input['delivery_site_id']})"
-                else:
-                    unique_id = f"{user_input['username'].lower()}_{int(time())}"
-                    title = f"{title} ({user_input['username']})"
+
+                # Create unique ID and title
+                unique_id, title = self._create_unique_id_and_title(
+                    user_input["username"], user_input.get("delivery_site_id")
+                )
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
 
-                # Create entry data
-                data = {
-                    CONF_USERNAME: user_input["username"],
-                    CONF_PASSWORD: user_input["password"],
-                    CONF_VAT: user_input["vat"],
-                }
-
-                # Add optional parameters if provided
-                if "default_unit_price" in user_input:
-                    data[CONF_DEFAULT_UNIT_PRICE] = user_input["default_unit_price"]
-                if "default_base_price" in user_input:
-                    data[CONF_DEFAULT_BASE_PRICE] = user_input["default_base_price"]
-                if "delivery_site_id" in user_input:
-                    data[CONF_DELIVERY_SITE_ID] = user_input["delivery_site_id"]
-                if "include_transfer_costs" in user_input:
-                    data[CONF_INCLUDE_TRANSFER_COSTS] = user_input[
-                        "include_transfer_costs"
-                    ]
-                if "is_fixed_price" in user_input:
-                    data[CONF_FIXED_PRICE] = user_input["is_fixed_price"]
-
+                # Build entry data and create entry
+                data = self._build_entry_data(user_input)
+                await self._cleanup_resources()
                 return self.async_create_entry(title=title, data=data)
 
-            except HelenAuthenticationException as ex:
-                _LOGGER.error("Authentication failed: %s", ex)
-                errors["base"] = "invalid_auth"
-            except InvalidDeliverySiteException as ex:
-                _LOGGER.error("Setting delivery site failed: %s", ex)
-                errors["base"] = "invalid_delivery_site_id"
-            except TimeoutError:
-                _LOGGER.error("Connection to Helen Energy timed out")
-                errors["base"] = "cannot_connect"
-            except ConnectionError:
-                _LOGGER.error("Failed to connect to Helen Energy")
-                errors["base"] = "cannot_connect"
+            except (
+                HelenAuthenticationException,
+                InvalidDeliverySiteException,
+                TimeoutError,
+                ConnectionError,
+                ValueError,
+            ) as ex:
+                errors = self._handle_errors(ex)
             except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected error while setting up Helen Energy")
-                errors["base"] = "cannot_connect"
+                _LOGGER.exception("Unexpected error during Helen Energy setup")
+                errors = {"base": "cannot_connect"}
+            finally:
+                await self._cleanup_resources()
 
-        data_schema = self.add_suggested_values_to_schema(
+        return self.async_show_form(
+            step_id="user", data_schema=self._get_user_schema(user_input), errors=errors
+        )
+
+    def _get_user_schema(self, user_input: dict[str, Any] | None = None) -> vol.Schema:
+        """Get the user input schema."""
+        return self.add_suggested_values_to_schema(
             vol.Schema(
                 {
                     vol.Required("username"): str,
@@ -131,25 +190,21 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         msg="VAT percentage must be between 0 and 100",
                     ),
                     vol.Optional("is_fixed_price", default=False): bool,
+                    vol.Optional("delivery_site_id"): str,
                     vol.Optional("default_unit_price"): vol.All(
                         vol.Coerce(float),
-                        vol.Range(min=0.00001),  # Ensure greater than 0
+                        vol.Range(min=0.00001),
                         msg="Unit price must be greater than 0",
                     ),
                     vol.Optional("default_base_price"): vol.All(
                         vol.Coerce(float),
-                        vol.Range(min=0.00001),  # Ensure greater than 0
+                        vol.Range(min=0.00001),
                         msg="Base price must be greater than 0",
                     ),
-                    vol.Optional("delivery_site_id"): str,
                     vol.Optional("include_transfer_costs", default=False): bool,
                 }
             ),
             user_input or {},
-        )
-
-        return self.async_show_form(
-            step_id="user", data_schema=data_schema, errors=errors
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
@@ -168,39 +223,33 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="reauth_failed")
 
             try:
-                # Create API client and test connection
-                self.price_client = HelenPriceClient()
-                margin = await self.hass.async_add_executor_job(
-                    lambda: self.price_client.get_exchange_prices().margin
-                )
-                self.api_client = HelenApiClient(entry.data[CONF_VAT] / 100, margin)
-
-                # Test authentication
-                await self.hass.async_add_executor_job(
-                    self.api_client.login_and_init,
-                    entry.data["username"],
-                    user_input["password"],
+                # Create API client and authenticate
+                self.api_client = await self._create_api_client(entry.data[CONF_VAT])
+                await self._authenticate(
+                    entry.data[CONF_USERNAME], user_input["password"]
                 )
 
+                # Update entry with new password
                 new_data = dict(entry.data)
-                new_data["password"] = user_input["password"]
+                new_data[CONF_PASSWORD] = user_input["password"]
 
                 self.hass.config_entries.async_update_entry(entry, data=new_data)
                 await self.hass.config_entries.async_reload(entry.entry_id)
+                await self._cleanup_resources()
                 return self.async_abort(reason="reauth_successful")
 
-            except HelenAuthenticationException as ex:
-                _LOGGER.error("Authentication failed during reauth: %s", ex)
-                errors["base"] = "invalid_auth"
-            except TimeoutError:
-                _LOGGER.error("Connection to Helen Energy timed out during reauth")
-                errors["base"] = "cannot_connect"
-            except ConnectionError:
-                _LOGGER.error("Failed to connect to Helen Energy during reauth")
-                errors["base"] = "cannot_connect"
+            except (
+                HelenAuthenticationException,
+                TimeoutError,
+                ConnectionError,
+                ValueError,
+            ) as ex:
+                errors = self._handle_errors(ex)
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected error during Helen Energy reauth")
-                errors["base"] = "cannot_connect"
+                errors = {"base": "cannot_connect"}
+            finally:
+                await self._cleanup_resources()
 
         return self.async_show_form(
             step_id="reauth_confirm",

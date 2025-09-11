@@ -51,8 +51,8 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
         return HelenApiClient(vat / 100, margin)
 
-    async def _authenticate(self, username: str, password: str) -> None:
-        """Authenticate with Helen API."""
+    async def _test_authentication(self, username: str, password: str) -> None:
+        """Test authentication with Helen API."""
         if self.api_client is None:
             raise ValueError("API client not initialized")
 
@@ -125,7 +125,8 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.price_client = None
 
         if self.api_client is not None:
-            # HelenApiClient doesn't have async close method, just clear reference
+            # Close the underlying session before clearing reference
+            await self.hass.async_add_executor_job(self.api_client.close)
             self.api_client = None
 
     async def async_step_user(
@@ -136,9 +137,11 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                # Create API client and authenticate
+                # Create API client and test authentication
                 self.api_client = await self._create_api_client(user_input[CONF_VAT])
-                await self._authenticate(user_input["username"], user_input["password"])
+                await self._test_authentication(
+                    user_input["username"], user_input["password"]
+                )
 
                 # Validate delivery site if provided
                 if "delivery_site_id" in user_input:
@@ -223,9 +226,9 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="reauth_failed")
 
             try:
-                # Create API client and authenticate
+                # Create API client and test authentication
                 self.api_client = await self._create_api_client(entry.data[CONF_VAT])
-                await self._authenticate(
+                await self._test_authentication(
                     entry.data[CONF_USERNAME], user_input["password"]
                 )
 

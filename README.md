@@ -33,9 +33,14 @@ git clone https://github.com/carohauta/oma-helen-ha-integration omahelen
 mv omahelen/custom_components/helen_energy/ .
 ```
 2. Restart HA
-3. Add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services` and `Add integration` and fill out the config form.
+3. Add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services` and `Add integration` and fill out the config form. 
+4. If you have legacy yaml config for the integration, you should remove it now.
 
-I recommend using `Tile card`s for a nice clean look.
+Dashboard tip: I recommend using the Tile cards for a nice clean look.
+
+### Migration from legacy configuration to the new UI config flow
+
+Just follow the install steps above. Your old entities will be automatically migrated and historical data retained. Remove any obsolete legacy yaml config related to this integration afterwards.
 
 ### How to interpret the entitites
 

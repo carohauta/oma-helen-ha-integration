@@ -28,12 +28,13 @@ Login to your HA with SSH
 💡 Tip: step #1 can be skipped if you installed the integration as HACS custom repository
 
 ```shell
-cd custom_components # create this folder if it does not exists
-git clone https://github.com/carohauta/oma-helen-ha-integration omahelen
-mv omahelen/custom_components/helen_energy/ .
+cd custom_components # create this folder if it does not exist
+git clone https://github.com/carohauta/oma-helen-ha-integration.git helen_energy_temp
+mv helen_energy_temp/custom_components/helen_energy/ .
+rm -rf helen_energy_temp
 ```
 2. Restart HA
-3. Add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services` and `Add integration` and fill out the config form. 
+3. Add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services > Add integration` and fill out the config form. Notice that you may now add even more entries directly from the UI in the integration settings!
 4. If you have legacy yaml config for the integration, you should remove it now.
 
 Dashboard tip: I recommend using the Tile cards for a nice clean look.
@@ -42,28 +43,32 @@ Dashboard tip: I recommend using the Tile cards for a nice clean look.
 
 Just follow the install steps above. Your old entities will be automatically migrated and historical data retained. Remove any obsolete legacy yaml config related to this integration afterwards.
 
-### How to interpret the entitites
+### How to interpret the entities
 
 Depending on your contract type you will see one of the following new entities:
 - sensor.helen_exchange_electricity
 - sensor.helen_market_price_electricity
 - sensor.helen_fixed_price_electricity
 
-The `state` of each entity is the total energy cost of the on-going month. In the state attributes you may find some other useful information like last month's and current month's energy consumptions, daily average consumption, current electricity price (in fixed contracts) etc. Use template sensors to display the attributes.
+**Multiple Entries**: If you have multiple Helen Energy Price entries configured, additional entries will have numbered suffixes (e.g., `sensor.helen_fixed_price_electricity_2`, `sensor.helen_monthly_consumption_3`).
+
+The `state` of each entity is the total energy cost of the ongoing month. In the state attributes you may find some other useful information like last month's and current month's energy consumptions, daily average consumption, current electricity price (in fixed contracts) etc. Use template sensors to display the attributes.
 
 If you have chosen to include the transfer costs you will also see the following entity:
 - sensor.helen_transfer_costs
 
-The `state` of the entity shows the total energy transfer costs for the on-going month. The price is presented in EUR and it includes the base price of your transfer contract. If Helen is not your energy transfer company, this entity does not serve a purpose and shows a default value of `0.0`.
+The `state` of the entity shows the total energy transfer costs for the ongoing month. The price is presented in EUR and it includes the base price of your transfer contract. If Helen is not your energy transfer company, this entity does not serve a purpose and shows a default value of `0.0`.
 
 The integration also supports HA energy dashboard via the following entity:
 - sensor.helen_monthly_consumption
 
-The `state` of the sensor is the total energy consumption (in kWh) of the on-going month.
+The `state` of the sensor is the total energy consumption (in kWh) of the ongoing month.
 
 ### Examples
 
-Template sensor configuration examples. Use these template sensors if you wish to extract additional data from each sensor entitys' attributes (unit price, daily average consumption etc.)
+Template sensor configuration examples. Use these template sensors if you wish to extract additional data from each sensor entity's attributes (unit price, daily average consumption etc.)
+
+**Note**: If you have added multiple Helen Energy Price entries, adjust the entity names in the templates below to match your specific entity names (e.g., `sensor.helen_fixed_price_electricity_2` for the second entry).
 
 #### Fixed Price Electricity
 
@@ -126,7 +131,7 @@ sensor:
           {{ 0 if state_attr('sensor.helen_exchange_electricity', 'last_month_consumption') == None else state_attr('sensor.helen_exchange_electricity', 'last_month_consumption')| round() }}
       helen_exchange_energy_last_month_total_cost:
         friendly_name: "Last month energy cost"
-        unit_of_measurement: "e"
+        unit_of_measurement: "EUR"
         icon_template: mdi:currency-eur
         value_template: >
             {{ 0 if state_attr('sensor.helen_exchange_electricity', 'last_month_total_cost') == None else state_attr('sensor.helen_exchange_electricity', 'last_month_total_cost') | round() }}
@@ -160,7 +165,7 @@ sensor:
             {{ 0 if state_attr('sensor.helen_market_price_electricity', 'last_month_consumption') == None else state_attr('sensor.helen_market_price_electricity', 'last_month_consumption') | round() }}
       helen_market_price_energy_last_month_total_cost:
         friendly_name: "Last month energy cost"
-        unit_of_measurement: "e"
+        unit_of_measurement: "EUR"
         icon_template: mdi:currency-eur
         value_template: >
             {{ 0 if state_attr('sensor.helen_market_price_electricity', 'last_month_total_cost') == None else state_attr('sensor.helen_market_price_electricity', 'last_month_total_cost') | round() }}

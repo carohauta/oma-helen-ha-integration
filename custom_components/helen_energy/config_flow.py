@@ -259,3 +259,49 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required("password"): str}),
             errors=errors,
         )
+
+    async def async_step_import(self, user_input: dict[str, Any]) -> FlowResult:
+        """Import configuration from YAML."""
+        _LOGGER.info("Importing Helen Energy configuration from YAML")
+        
+        # Create unique ID from username 
+        unique_id = f"{user_input[CONF_USERNAME].lower()}_yaml_import"
+        await self.async_set_unique_id(unique_id)
+        self._abort_if_unique_id_configured()
+
+        try:
+            # Validate credentials by creating API client and testing login
+            await self._test_credentials(user_input)
+            
+            # Map legacy contract_type to our boolean flags
+            contract_type = user_input.get("contract_type", "").upper()
+            is_fixed_price = contract_type == "FIXED"
+            
+            # Create config entry data
+            data = {
+                CONF_USERNAME: user_input[CONF_USERNAME],
+                CONF_PASSWORD: user_input[CONF_PASSWORD],
+                CONF_VAT: user_input.get(CONF_VAT, 25.5),
+                CONF_FIXED_PRICE: is_fixed_price,
+                CONF_INCLUDE_TRANSFER_COSTS: user_input.get(CONF_INCLUDE_TRANSFER_COSTS, False),
+            }
+            
+            # Add optional fields if present
+            if "default_unit_price" in user_input:
+                data[CONF_DEFAULT_UNIT_PRICE] = user_input["default_unit_price"]
+            if "default_base_price" in user_input:
+                data[CONF_DEFAULT_BASE_PRICE] = user_input["default_base_price"]
+            if "delivery_site_id" in user_input:
+                data[CONF_DELIVERY_SITE_ID] = user_input["delivery_site_id"]
+                
+            return self.async_create_entry(
+                title=f"Helen Energy ({user_input[CONF_USERNAME]})",
+                data=data
+            )
+            
+        except HelenAuthenticationException:
+            _LOGGER.error("Authentication failed during YAML import")
+            return self.async_abort(reason="invalid_auth")
+        except Exception as err:
+            _LOGGER.error("Unexpected error during YAML import: %s", err)
+            return self.async_abort(reason="unknown")

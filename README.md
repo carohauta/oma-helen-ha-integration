@@ -41,7 +41,7 @@ Dashboard tip: I recommend using the Tile cards for a nice clean look.
 
 ### Migration from legacy configuration to the new UI config flow
 
-Just follow the install steps above. Your old entities will be automatically migrated and historical data retained. Remove any obsolete legacy yaml config related to this integration afterwards.
+Follow the install steps above. Your old entities will be automatically migrated and historical data retained as you add your first entry. Remove any obsolete legacy yaml config related to this integration afterwards.
 
 ### How to interpret the entities
 

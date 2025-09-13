@@ -5,28 +5,31 @@
 [Home Assistant](https://www.home-assistant.io/) integration for [Oma Helen Python module](https://github.com/carohauta/oma-helen-cli). Periodically fetch your electricity consumption and estimated costs.
 
 ![Tile card example](example.png)
+💡 Dashboard tip: I recommend using Tile cards for a nice, clean look like in the screenshot above.
 
 The integration works with the following contract types:
 - Exchange Electricity (=pörssisähkö) https://www.helen.fi/en/electricity/electricity-products-and-prices/exchange-electricity
 - Market Price Electricity https://www.helen.fi/en/electricity/electricity-products-and-prices/marketpriceelectricity
 - Fixed Price Electricity https://www.helen.fi/en/electricity/electricity-products-and-prices/fixed-price-basic-electricity
 
-### How to install
-
 Requires HA Core version 2022.7.0 or newer
 
-Install as [HACS custom repository](https://hacs.xyz/docs/faq/custom_repositories)
-OR
-Copy the `helen_energy/` folder into your HA `config/custom_components/`
+### How to install via HACS
 
-#### Step-by-step manual installation
+This is the recommended way.
+
+1. Install as [HACS custom repository](https://hacs.xyz/docs/faq/custom_repositories)
+[![Open your Home Assistant instance and open the Oma Helen custom component repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=carohauta&repository=oma-helen-ha-integration)
+2. Restart HA
+3. Add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services > Add integration` and fill out the config form. Notice that you may now add even more entries directly from the UI in the integration settings!
+
+### How to install manually
+
+This is not the recommended way.
 
 Login to your HA with SSH
 
 1. Go to the HA configuration root folder, which is the same folder where your `configuration.yaml` is located. Run the following commands
-
-💡 Tip: step #1 can be skipped if you installed the integration as HACS custom repository
-
 ```shell
 cd custom_components # create this folder if it does not exist
 git clone https://github.com/carohauta/oma-helen-ha-integration.git helen_energy_temp
@@ -35,13 +38,10 @@ rm -rf helen_energy_temp
 ```
 2. Restart HA
 3. Add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services > Add integration` and fill out the config form. Notice that you may now add even more entries directly from the UI in the integration settings!
-4. If you have legacy yaml config for the integration, you should remove it now.
-
-Dashboard tip: I recommend using the Tile cards for a nice clean look.
 
 ### Migration from legacy configuration to the new UI config flow
 
-Follow the install steps above. Your old entities will be automatically migrated and historical data retained as you add your first entry. Remove any obsolete legacy yaml config related to this integration afterwards.
+Follow either of the install steps above. Your old entities will be automatically migrated and historical data retained as you add your first entry. **Remove any obsolete legacy yaml config related to this integration afterwards.**
 
 ### How to interpret the entities
 

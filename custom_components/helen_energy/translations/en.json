@@ -2,8 +2,8 @@
     "config": {
         "step": {
             "user": {
-                "title": "Connect to Helen Energy",
-                "description": "Enter your Helen Energy credentials to monitor your electricity consumption and costs",
+                "title": "Connect to Oma Helen",
+                "description": "Enter your Oma Helen credentials to monitor your electricity consumption and costs",
                 "data": {
                     "username": "Username",
                     "password": "Password",
@@ -20,17 +20,16 @@
                     "default_base_price": "Set a base price if you want to override the price from Helen",
                     "delivery_site_id": "If you have multiple delivery sites, enter the ID of the site you want to monitor",
                     "include_transfer_costs": "Check, if you want to track the transfer costs",
-                    "contract_type": "Select your Helen contract type",
                     "is_fixed_price": "Check, if you want to force a fixed price contract type. For example, if you have a contract that is not yet supported"
                 }
             },
             "reauth_confirm": {
-                "title": "Reauthenticate with Helen Energy",
-                "description": "Please enter your password again to reauthenticate with Helen Energy"
+                "title": "Reauthenticate with Oma Helen",
+                "description": "Please enter your password again to reauthenticate with Oma Helen"
             }
         },
         "error": {
-            "cannot_connect": "Failed to connect to Helen Energy. Please check your internet connection and try again. If the problem persists, the service might be temporarily unavailable.",
+            "cannot_connect": "Failed to connect to Oma Helen. Please check your internet connection and try again. If the problem persists, the service might be temporarily unavailable.",
             "invalid_auth": "Invalid username or password. Please check your credentials and try again.",
             "invalid_delivery_site_id": "Invalid delivery site ID. Please check that the ID exists.",
             "unknown": "An unexpected error occurred. Please check the logs for more details."

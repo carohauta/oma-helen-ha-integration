@@ -21,6 +21,7 @@ This is the recommended way.
 1. Install as [HACS custom repository](https://hacs.xyz/docs/faq/custom_repositories)
 
 [![Open your Home Assistant instance and open the Oma Helen custom component repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=carohauta&repository=oma-helen-ha-integration)
+
 2. Restart HA
 3. Add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services > Add integration` and fill out the config form. Notice that you may now add even more entries directly from the UI in the integration settings!
 

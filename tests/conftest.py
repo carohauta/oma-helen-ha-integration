@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import Mock, AsyncMock
 from datetime import date
+from types import MappingProxyType
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
@@ -89,7 +90,7 @@ def mock_config_entry():
         entry_id="test_entry_id",
         unique_id="testuser_12345",
         options={},
-        discovery_keys=set(),
+        discovery_keys=MappingProxyType({}),
     )
 
 
@@ -115,7 +116,7 @@ def mock_config_entry_with_transfer_costs():
         entry_id="test_entry_id",
         unique_id="testuser_12345",
         options={},
-        discovery_keys=set(),
+        discovery_keys=MappingProxyType({}),
     )
 
 

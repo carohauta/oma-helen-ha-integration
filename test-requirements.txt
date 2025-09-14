@@ -3,7 +3,7 @@ pytest>=7.0.0
 pytest-cov>=4.0.0
 
 # Home Assistant for testing integration components
-homeassistant>=2024.1.0
+homeassistant>=2024.1.0,<2025.2.0
 
 # Mocking and testing utilities
 responses>=0.22.0

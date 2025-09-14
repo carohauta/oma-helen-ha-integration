@@ -17,21 +17,22 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r test-requirements.txt
+        pip install --upgrade setuptools wheel
+        pip install --no-cache-dir -r test-requirements.txt
 
     - name: Test with pytest
       run: |
         pytest tests/ -v --cov=custom_components.helen_energy --cov-report=xml
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
         flags: unittests

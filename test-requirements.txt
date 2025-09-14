@@ -1,0 +1,13 @@
+# Test requirements for Helen Energy integration
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Mocking and testing utilities
+responses>=0.22.0
+
+# Helen service dependencies (should match manifest.json)
+oma-helen-cli==1.4.0
+
+# Optional: For better test output
+pytest-html>=3.1.0
+pytest-xdist>=3.0.0

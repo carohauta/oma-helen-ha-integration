@@ -1,25 +1,16 @@
 """Test the Helen Energy sensor platform."""
 
-import pytest
-from unittest.mock import Mock, AsyncMock, patch
-from datetime import date, timedelta
+from unittest.mock import patch
 import math
 
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.update_coordinator import UpdateFailed
-from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from custom_components.helen_energy.sensor import (
-    HelenDataCoordinator,
     HelenBaseSensor,
     HelenMarketPriceElectricity,
     HelenExchangeElectricity,
-    HelenSmartGuarantee,
     HelenFixedPriceElectricity,
     HelenTransferPrice,
     HelenMonthlyConsumption,
-    async_setup_entry,
 )
 from custom_components.helen_energy.const import DOMAIN
 

@@ -1,11 +1,9 @@
 """Common test fixtures and helpers for Helen Energy integration."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
-from datetime import datetime, date
-from typing import Any, Dict
+from unittest.mock import Mock, AsyncMock
+from datetime import date
 
-from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
 

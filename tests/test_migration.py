@@ -1,22 +1,14 @@
 """Test the Helen Energy migration utilities."""
 
-import pytest
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, patch
 
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers import entity_registry as er
-from homeassistant.const import CONF_USERNAME
 
 from custom_components.helen_energy.migration import (
-    async_migrate_entry,
-    async_migrate_entities_for_compatibility,
     get_legacy_entity_name,
     should_preserve_legacy_entity_id,
     should_use_legacy_names,
     LEGACY_ENTITY_MAPPINGS,
 )
-from custom_components.helen_energy.const import DOMAIN
 
 
 class TestMigrationUtilities:

@@ -1,17 +1,10 @@
 """Test the Helen Energy integration initialization."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
 
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
-from homeassistant.setup import async_setup_component
 
 from custom_components.helen_energy import (
-    async_setup,
-    async_setup_entry,
-    async_unload_entry,
     CONFIG_SCHEMA,
 )
 from custom_components.helen_energy.const import DOMAIN, CONF_VAT, CONF_INCLUDE_TRANSFER_COSTS

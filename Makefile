@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-cov lint type-check clean install-dev
+.PHONY: test test-cov clean install-dev test-debug test-file help
 
 # Default Python interpreter
 PYTHON := python3
@@ -12,34 +12,17 @@ install-dev:
 test:
 	pytest tests/ -v
 
-# Run only unit tests (exclude integration tests)
-test-unit:
-	pytest tests/ -v -m "not integration"
-
-# Run only integration tests
-test-integration:
-	pytest tests/ -v -m integration
-
 # Run tests with coverage report
 test-cov:
 	pytest tests/ -v --cov=custom_components.helen_energy --cov-report=term-missing --cov-report=html
 
-# Run linting
-lint:
-	flake8 custom_components tests --max-line-length=127 --exclude=__pycache__
-	black --check custom_components tests --line-length=127
-
-# Run type checking
-type-check:
-	mypy custom_components/helen_energy --ignore-missing-imports --no-strict-optional
-
-# Format code
-format:
-	black custom_components tests --line-length=127
-	isort custom_components tests
-
-# Run all quality checks
-check: lint type-check test
+# Generate coverage report and open in browser (macOS)
+test-cov-open: test-cov
+	@if command -v open >/dev/null 2>&1; then \
+		open htmlcov/index.html; \
+	else \
+		echo "Coverage report generated in htmlcov/index.html"; \
+	fi
 
 # Clean up generated files
 clean:
@@ -47,26 +30,30 @@ clean:
 	rm -rf htmlcov/
 	rm -rf .coverage
 	rm -rf coverage.xml
-	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
-
-# Run tests in watch mode (requires pytest-xdist)
-test-watch:
-	pytest tests/ -v -f
-
-# Generate coverage report and open in browser
-test-cov-open: test-cov
-	open htmlcov/index.html
 
 # Run specific test file
 test-file:
-	@echo "Usage: make test-file FILE=test_sensor.py"
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make test-file FILE=test_sensor.py"; \
+		exit 1; \
+	fi
 	pytest tests/$(FILE) -v
 
 # Debug mode - run tests with pdb on failure
 test-debug:
 	pytest tests/ -v --pdb
 
-# Run tests in parallel (requires pytest-xdist)
-test-parallel:
-	pytest tests/ -v -n auto
+# Show help
+help:
+	@echo "Helen Energy Integration - Available Make Targets:"
+	@echo ""
+	@echo "  install-dev     Install development dependencies"
+	@echo "  test            Run all tests"
+	@echo "  test-cov        Run tests with coverage report"
+	@echo "  test-cov-open   Generate coverage report and open in browser"
+	@echo "  test-file       Run specific test file (make test-file FILE=test_sensor.py)"
+	@echo "  test-debug      Run tests with debugger on failure"
+	@echo "  clean           Remove generated files and cache"
+	@echo "  help            Show this help message"

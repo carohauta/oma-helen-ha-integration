@@ -104,8 +104,8 @@ class TestHelenFixedPriceElectricity:
         with patch("custom_components.helen_energy.migration.should_use_legacy_names", return_value=False):
             sensor = HelenFixedPriceElectricity(mock_coordinator)
             
-            # Expected: (150.5 * 8.5 / 100) + 5.0 = 12.7925 + 5.0 = 17.7925 -> ceil(17.7925) = 18
-            expected_value = math.ceil(150.5 * 8.5 / 100 + 5.0)
+            # Expected: (150.5 * 8.5 / 100) + 5.0 = 12.7925 + 5.0 = 17.7925 -> round(17.7925, 2) = 17.79
+            expected_value = round(150.5 * 8.5 / 100 + 5.0, 2)
             assert sensor.native_value == expected_value
 
     def test_fixed_price_sensor_extra_state_attributes(self, mock_coordinator, mock_coordinator_data):
@@ -140,7 +140,7 @@ class TestHelenMarketPriceElectricity:
                 + (current_month_price * 150.5)  # current consumption
                 + (2 * 4.8 * current_month_price)  # daily average * 2
             )
-            expected_value = math.ceil(current_month_cost_estimate)
+            expected_value = round(current_month_cost_estimate, 2)
             
             assert sensor.native_value == expected_value
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import logging
-import math
 from typing import Any
 
 from dateutil.relativedelta import relativedelta
@@ -30,7 +29,6 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
-    UpdateFailed,
 )
 
 from .const import (
@@ -50,6 +48,16 @@ from .migration import (
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=3)
+
+
+def safe_round(value: float | None, decimals: int = 2) -> float:
+    """Safely round a value, returning 0.0 if value is None or non-numeric."""
+    if value is None:
+        return 0.0
+    try:
+        return round(float(value), decimals)
+    except (TypeError, ValueError):
+        return 0.0
 
 # common for all contract types
 STATE_ATTR_DAILY_AVERAGE_CONSUMPTION = "daily_average_consumption"
@@ -180,8 +188,8 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 )
 
                 data["exchange_costs"] = {
-                    "current_month": math.ceil(current_month_cost),
-                    "last_month": math.ceil(last_month_cost),
+                    "current_month": safe_round(current_month_cost),
+                    "last_month": safe_round(last_month_cost),
                 }
             except InvalidApiResponseException:
                 data["exchange_costs"] = None
@@ -338,10 +346,11 @@ async def _get_total_consumption_between_dates(
     )
     if not measurement_response.intervals.electricity:
         return 0.0
-    return sum(
+    total = sum(
         m.value if m.status == "valid" else 0.0
         for m in measurement_response.intervals.electricity[0].measurements
     )
+    return safe_round(total)
 
 
 async def _get_total_consumption_for_last_month(
@@ -370,9 +379,10 @@ async def get_transfer_price_total_for_current_month(
 ):
     """Get the total energy transfer price."""
     start_date, end_date = get_month_date_range_by_date(date.today())
-    return await hass.async_add_executor_job(
+    result = await hass.async_add_executor_job(
         helen_api_client.calculate_transfer_fees_between_dates, start_date, end_date
     )
+    return safe_round(result)
 
 
 async def _get_average_daily_consumption_for_current_month(
@@ -390,9 +400,10 @@ async def _get_average_daily_consumption_for_current_month(
         for m in measurement_response.intervals.electricity[0].measurements
         if m.status == "valid"
     ]
-    return (
+    average = (
         sum(valid_measurements) / len(valid_measurements) if valid_measurements else 0
     )
+    return safe_round(average)
 
 
 class HelenBaseSensor(CoordinatorEntity, SensorEntity):
@@ -455,21 +466,21 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
     def _get_base_price(self, data: dict[str, Any]) -> float:
         """Get base price with override if set."""
         if self._default_base_price is not None:
-            return self._default_base_price
-        return data.get("contract_base_price", 0)
+            return safe_round(self._default_base_price)
+        return safe_round(data.get("contract_base_price", 0))
 
     def _get_unit_price(self, data: dict[str, Any]) -> float:
         """Get unit price with override if set."""
         if self._default_unit_price is not None:
-            return self._default_unit_price
-        return data.get("unit_price", 0)
+            return safe_round(self._default_unit_price)
+        return safe_round(data.get("unit_price", 0))
 
     def _get_consumption_attributes(self, data: dict[str, Any]) -> dict[str, Any]:
         """Get common consumption attributes."""
         return {
-            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: data.get("current_month_consumption"),
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: data.get("last_month_consumption"),
-            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: data.get("daily_average_consumption"),
+            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: safe_round(data.get("current_month_consumption", 0)),
+            STATE_ATTR_LAST_MONTH_CONSUMPTION: safe_round(data.get("last_month_consumption", 0)),
+            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: safe_round(data.get("daily_average_consumption", 0)),
             STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
         }
 
@@ -516,7 +527,7 @@ class HelenMarketPriceElectricity(HelenBaseSensor):
             + (current_month_price * current_month_consumption)
             + (2 * daily_average_consumption * current_month_price)
         )
-        return math.ceil(current_month_cost_estimate)
+        return safe_round(current_month_cost_estimate)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -531,7 +542,7 @@ class HelenMarketPriceElectricity(HelenBaseSensor):
 
         # Calculate last month total cost
         last_month_price = market_prices.get("last_month", 0) / 100
-        last_month_total_cost = last_month_price * last_month_consumption + base_price
+        last_month_total_cost = safe_round(last_month_price * last_month_consumption + base_price)
 
         # Use default unit price for current month if set
         current_month_price = (
@@ -543,9 +554,9 @@ class HelenMarketPriceElectricity(HelenBaseSensor):
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
             STATE_ATTR_LAST_MONTH_TOTAL_COST: last_month_total_cost,
-            STATE_ATTR_PRICE_LAST_MONTH: market_prices.get("last_month"),
-            STATE_ATTR_PRICE_CURRENT_MONTH: current_month_price,
-            STATE_ATTR_PRICE_NEXT_MONTH: market_prices.get("next_month"),
+            STATE_ATTR_PRICE_LAST_MONTH: safe_round(market_prices.get("last_month")) if market_prices.get("last_month") is not None else None,
+            STATE_ATTR_PRICE_CURRENT_MONTH: safe_round(current_month_price) if current_month_price is not None else None,
+            STATE_ATTR_PRICE_NEXT_MONTH: safe_round(market_prices.get("next_month")) if market_prices.get("next_month") is not None else None,
         }
         attributes.update(self._get_consumption_attributes(data))
         return attributes
@@ -580,7 +591,7 @@ class HelenExchangeElectricity(HelenBaseSensor):
         if not exchange_costs:
             return None
 
-        return exchange_costs["current_month"] + base_price
+        return safe_round(exchange_costs["current_month"] + base_price)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -595,7 +606,7 @@ class HelenExchangeElectricity(HelenBaseSensor):
         if not exchange_costs:
             return self._get_consumption_attributes(data)
 
-        last_month_total_cost = exchange_costs["last_month"] + base_price
+        last_month_total_cost = safe_round(exchange_costs["last_month"] + base_price)
 
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
@@ -647,7 +658,7 @@ class HelenSmartGuarantee(HelenBaseSensor):
             + base_price
         )
 
-        return math.ceil(current_month_total_cost)
+        return safe_round(current_month_total_cost)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -663,9 +674,9 @@ class HelenSmartGuarantee(HelenBaseSensor):
             return self._get_consumption_attributes(data)
 
         unit_price = self._get_unit_price(data)
-        current_month_energy_price_with_impact = (
+        current_month_energy_price_with_impact = safe_round((
             unit_price + smart_guarantee["current_month_impact"]
-        ) / 100
+        ) / 100)
 
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
@@ -708,7 +719,7 @@ class HelenFixedPriceElectricity(HelenBaseSensor):
             current_month_consumption * unit_price / 100 + base_price
         )
 
-        return math.ceil(current_month_total_cost)
+        return safe_round(current_month_total_cost)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -776,7 +787,7 @@ class HelenTransferPrice(CoordinatorEntity, SensorEntity):
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.get("transfer_costs", 0)
+        return safe_round(self.coordinator.data.get("transfer_costs", 0))
 
 
 class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
@@ -827,4 +838,4 @@ class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return 0
-        return self.coordinator.data.get("current_month_consumption", 0)
+        return safe_round(self.coordinator.data.get("current_month_consumption", 0))

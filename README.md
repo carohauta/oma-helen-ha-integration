@@ -1,5 +1,5 @@
 # Oma Helen Home Assistant integration  
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom.svg)](https://github.com/hacs/integration)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Tests](https://github.com/carohauta/oma-helen-ha-integration/actions/workflows/test.yml/badge.svg)](https://github.com/carohauta/oma-helen-ha-integration/actions/workflows/test.yml)
 
 

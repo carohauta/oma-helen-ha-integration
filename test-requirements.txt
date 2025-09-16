@@ -1,6 +1,7 @@
 # Test requirements for Helen Energy integration
 pytest>=7.0.0
 pytest-cov>=4.0.0
+pytest-asyncio>=0.21.0
 
 # Home Assistant for testing integration components
 homeassistant==2025.1.4

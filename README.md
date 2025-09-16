@@ -1,7 +1,7 @@
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
+# Oma Helen Home Assistant integration  
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom.svg)](https://github.com/hacs/integration)
 [![Tests](https://github.com/carohauta/oma-helen-ha-integration/actions/workflows/test.yml/badge.svg)](https://github.com/carohauta/oma-helen-ha-integration/actions/workflows/test.yml)
 
-# Oma Helen Home Assistant integration
 
 [Home Assistant](https://www.home-assistant.io/) integration for [Oma Helen Python module](https://github.com/carohauta/oma-helen-cli). Periodically fetch your electricity consumption and estimated costs.
 

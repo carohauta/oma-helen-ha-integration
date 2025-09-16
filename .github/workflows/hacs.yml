@@ -1,0 +1,15 @@
+name: HACS
+
+on:
+  push:
+    branches: [ main, dev, feature/* ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: HACS Action
+        uses: hacs/action@22.5.0

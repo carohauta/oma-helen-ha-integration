@@ -203,9 +203,17 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             if "authentication" in str(err).lower():
                 # Trigger reauth if it's an auth error
                 raise ConfigEntryAuthFailed from err
-            raise UpdateFailed(f"Error communicating with Helen API: {err}") from err
+            # For network/API errors, log the error but keep the last known data
+            _LOGGER.warning(
+                "Error communicating with Helen API, keeping last known values: %s", err
+            )
+            # Return the existing data if available, otherwise return empty dict
+            return self.data if self.data is not None else {}
         except Exception as err:
-            raise UpdateFailed(f"Unexpected error: {err}") from err
+            # For unexpected errors, log but don't fail the update
+            _LOGGER.error("Unexpected error fetching Helen data, keeping last known values: %s", err)
+            # Return the existing data if available, otherwise return empty dict
+            return self.data if self.data is not None else {}
         else:
             return data
         finally:

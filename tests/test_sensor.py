@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 import math
+import pytest
 
 
 from custom_components.helen_energy.sensor import (
@@ -23,6 +24,44 @@ class TestHelenDataCoordinator:
         assert mock_coordinator.name == "Helen Energy"
         assert mock_coordinator.config_entry is not None
         assert mock_coordinator.api_client is not None
+
+    @pytest.mark.asyncio
+    async def test_coordinator_network_error_preserves_data(self, mock_hass, mock_config_entry, mock_helen_api_client, mock_helen_price_client):
+        """Test that network errors preserve the last known data instead of making entities unavailable."""
+        from custom_components.helen_energy.sensor import HelenDataCoordinator
+        from helenservice.api_exceptions import InvalidApiResponseException
+        
+        coordinator = HelenDataCoordinator(
+            mock_hass,
+            mock_config_entry,
+            mock_helen_api_client,
+            mock_helen_price_client,
+            {"username": "test", "password": "test"},
+            delivery_site_id=None,
+            include_transfer_costs=False,
+        )
+        
+        # Set some initial data as if a previous update was successful
+        initial_data = {
+            "current_month_consumption": 100.0,
+            "last_month_consumption": 95.0,
+            "contract_base_price": 5.0,
+            "contract_type": "PERUS"
+        }
+        coordinator.data = initial_data
+        
+        # Mock the login function to raise a network error (this will cause the broad exception handling)
+        from custom_components.helen_energy.sensor import _login_helen_api_if_needed
+        
+        # Patch the login function to raise an error, which will trigger the broad exception handling
+        import unittest.mock
+        with unittest.mock.patch('custom_components.helen_energy.sensor._login_helen_api_if_needed', 
+                                side_effect=InvalidApiResponseException("Network connection failed")):
+            # Run the update - it should preserve the last known data
+            result = await coordinator._async_update_data()
+            
+            # The result should be the previous data, not None
+            assert result == initial_data
 
 
 class TestHelenBaseSensor:

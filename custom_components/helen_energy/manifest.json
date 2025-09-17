@@ -8,5 +8,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/carohauta/oma-helen-ha-integration/issues",
   "requirements": ["oma-helen-cli==1.4.0"],
-  "version": "2.0.0"
+  "version": "2.0.1"
 }

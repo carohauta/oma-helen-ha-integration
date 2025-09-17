@@ -17,7 +17,7 @@ Requires HA Core version 2022.7.0 or newer
 
 ### How to install
 
-The recommended way it to install via HACS
+The recommended way is to install via HACS
 
 [![Open your Home Assistant instance and open the Oma Helen custom component repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=carohauta&repository=oma-helen-ha-integration)
 

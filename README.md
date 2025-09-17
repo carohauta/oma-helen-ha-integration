@@ -1,11 +1,11 @@
 # Oma Helen Home Assistant integration  
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
 [![Tests](https://github.com/carohauta/oma-helen-ha-integration/actions/workflows/test.yml/badge.svg)](https://github.com/carohauta/oma-helen-ha-integration/actions/workflows/test.yml)
 
 
 [Home Assistant](https://www.home-assistant.io/) integration for [Oma Helen Python module](https://github.com/carohauta/oma-helen-cli). Periodically fetch your electricity consumption and estimated costs.
 
-![Tile card example](example.png)
+![Tile card example](example.png)  
 💡 Dashboard tip: I recommend using Tile cards for a nice, clean look like in the screenshot above.
 
 The integration works with the following contract types:
@@ -15,16 +15,13 @@ The integration works with the following contract types:
 
 Requires HA Core version 2022.7.0 or newer
 
-### How to install via HACS
+### How to install
 
-This is the recommended way.
-
-1. Install as [HACS custom repository](https://hacs.xyz/docs/faq/custom_repositories)
+The recommended way it to install via HACS
 
 [![Open your Home Assistant instance and open the Oma Helen custom component repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=carohauta&repository=oma-helen-ha-integration)
 
-2. Restart HA
-3. Add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services > Add integration` and fill out the config form. Notice that you may now add even more entries directly from the UI in the integration settings!
+Then restart HA and add the `Helen Energy Price` integration via the UI in `Settings > Devices & Services > Add integration` and fill out the config form. Notice that you may now add even more entries directly from the UI in the integration settings!
 
 ### How to install manually
 

@@ -41,6 +41,10 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.api_client: HelenApiClient | None = None
         self.price_client: HelenPriceClient | None = None
 
+    def is_matching(self, other_flow: config_entries.ConfigFlow) -> bool:
+        """Return True if the other flow is for the same domain."""
+        return other_flow.handler == DOMAIN
+
     async def _create_api_client(self, vat: float) -> HelenApiClient:
         """Create and initialize API client."""
         if self.price_client is None:
@@ -118,6 +122,26 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _LOGGER.exception("Unexpected error while setting up Helen Energy")
         return {"base": "cannot_connect"}
 
+    async def _validate_contract_type(self) -> tuple[bool, str | None]:
+        """Validate that the contract type is supported."""
+        if self.api_client is None:
+            raise ValueError("API client not initialized")
+
+        try:
+            contract_type = await self.hass.async_add_executor_job(
+                self.api_client.get_contract_type
+            )
+            # Check if contract type is supported
+            supported_types = ["PERUS", "KAYTTO", "MARK", "PORS", "VALTTI"]
+            if any(supported_type in contract_type for supported_type in supported_types):
+                return True, None
+
+            return False, contract_type
+        except Exception as ex: # pylint: disable=broad-exception-caught
+            _LOGGER.warning("Could not validate contract type: %s", ex)
+            # If we can't validate, allow the setup to continue
+            return True, None
+
     async def _cleanup_resources(self) -> None:
         """Clean up any initialized resources."""
         if self.price_client is not None:
@@ -149,6 +173,18 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self.api_client.select_delivery_site_if_valid_id,
                         user_input["delivery_site_id"],
                     )
+
+                # Validate contract type unless fixed price is enabled
+                if not user_input.get("is_fixed_price", False):
+                    is_supported, contract_type = await self._validate_contract_type()
+                    if not is_supported:
+                        await self._cleanup_resources()
+                        return self.async_show_form(
+                            step_id="user",
+                            data_schema=self._get_user_schema(user_input),
+                            errors={"base": "unsupported_contract_type"},
+                            description_placeholders={"contract_type": contract_type or "Unknown"}
+                        )
 
                 # Create unique ID and title
                 unique_id, title = self._create_unique_id_and_title(
@@ -210,7 +246,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user_input or {},
         )
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+    async def async_step_reauth(self, _entry_data: dict[str, Any]) -> FlowResult:
         """Handle reauth if token is invalid."""
         return await self.async_step_reauth_confirm()
 
@@ -263,20 +299,23 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_import(self, user_input: dict[str, Any]) -> FlowResult:
         """Import configuration from YAML."""
         _LOGGER.info("Importing Helen Energy configuration from YAML")
-        
-        # Create unique ID from username 
+
+        # Create unique ID from username
         unique_id = f"{user_input[CONF_USERNAME].lower()}_yaml_import"
         await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
 
         try:
             # Validate credentials by creating API client and testing login
-            await self._test_credentials(user_input)
-            
+            self.api_client = await self._create_api_client(user_input.get(CONF_VAT, 25.5))
+            await self._test_authentication(
+                user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
+            )
+
             # Map legacy contract_type to our boolean flags
             contract_type = user_input.get("contract_type", "").upper()
             is_fixed_price = contract_type == "FIXED"
-            
+
             # Create config entry data
             data = {
                 CONF_USERNAME: user_input[CONF_USERNAME],
@@ -285,7 +324,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_FIXED_PRICE: is_fixed_price,
                 CONF_INCLUDE_TRANSFER_COSTS: user_input.get(CONF_INCLUDE_TRANSFER_COSTS, False),
             }
-            
+
             # Add optional fields if present
             if "default_unit_price" in user_input:
                 data[CONF_DEFAULT_UNIT_PRICE] = user_input["default_unit_price"]
@@ -293,15 +332,16 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data[CONF_DEFAULT_BASE_PRICE] = user_input["default_base_price"]
             if "delivery_site_id" in user_input:
                 data[CONF_DELIVERY_SITE_ID] = user_input["delivery_site_id"]
-                
+
             return self.async_create_entry(
                 title=f"Helen Energy ({user_input[CONF_USERNAME]})",
                 data=data
             )
-            
         except HelenAuthenticationException:
             _LOGGER.error("Authentication failed during YAML import")
             return self.async_abort(reason="invalid_auth")
-        except Exception as err:
+        except Exception as err: # pylint: disable=broad-exception-caught
             _LOGGER.error("Unexpected error during YAML import: %s", err)
             return self.async_abort(reason="unknown")
+        finally:
+            await self._cleanup_resources()

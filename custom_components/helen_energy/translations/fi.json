@@ -33,7 +33,7 @@
             "invalid_auth": "Virheellinen käyttäjätunnus tai salasana. Tarkista tunnukset ja yritä uudelleen.",
             "invalid_delivery_site_id": "Virheellinen käyttöpaikan tunnus. Tarkista, että tunnus on olemassa.",
             "contract_type_not_detected": "Sopimustyyppiä ei voitu tunnistaa. Valitse sopimustyyppi manuaalisesti.",
-            "contract_type_not_resolved": "Sopimustyyppiä '{contract_type}' ei voitu tunnistaa luotettavasti. Valitse sopimustyyppi manuaalisesti.",
+            "contract_type_not_resolved": "Sopimustyyppiä {contract_type} ei voitu tunnistaa luotettavasti. Valitse sopimustyyppi manuaalisesti.",
             "unknown": "Odottamaton virhe tapahtui. Tarkista lokit saadaksesi lisätietoja."
         },
         "abort": {

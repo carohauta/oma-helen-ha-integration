@@ -1,13 +1,14 @@
 """Test the Helen Energy integration initialization."""
 
 import pytest
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
-
-from custom_components.helen_energy import (
-    CONFIG_SCHEMA,
+from custom_components.helen_energy import CONFIG_SCHEMA
+from custom_components.helen_energy.const import (
+    CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_VAT,
+    DOMAIN,
 )
-from custom_components.helen_energy.const import DOMAIN, CONF_VAT, CONF_INCLUDE_TRANSFER_COSTS
 
 
 class TestConfigSchema:
@@ -21,9 +22,9 @@ class TestConfigSchema:
                 CONF_PASSWORD: "testpass",
             }
         }
-        
+
         result = CONFIG_SCHEMA(config)
-        
+
         assert result[DOMAIN][CONF_USERNAME] == "testuser"
         assert result[DOMAIN][CONF_PASSWORD] == "testpass"
         assert result[DOMAIN][CONF_VAT] == 25.5  # Default value
@@ -43,9 +44,9 @@ class TestConfigSchema:
                 CONF_INCLUDE_TRANSFER_COSTS: True,
             }
         }
-        
+
         result = CONFIG_SCHEMA(config)
-        
+
         assert result[DOMAIN][CONF_USERNAME] == "testuser"
         assert result[DOMAIN][CONF_PASSWORD] == "testpass"
         assert result[DOMAIN][CONF_VAT] == 24.0
@@ -64,7 +65,7 @@ class TestConfigSchema:
                 CONF_VAT: -5.0,
             }
         }
-        
+
         with pytest.raises(Exception):  # Should raise validation error
             CONFIG_SCHEMA(config)
 
@@ -77,7 +78,7 @@ class TestConfigSchema:
                 CONF_VAT: 150.0,
             }
         }
-        
+
         with pytest.raises(Exception):  # Should raise validation error
             CONFIG_SCHEMA(config)
 
@@ -91,7 +92,7 @@ class TestConfigSchema:
                 "default_base_price": -2.0,
             }
         }
-        
+
         with pytest.raises(Exception):  # Should raise validation error
             CONFIG_SCHEMA(config)
 
@@ -103,7 +104,7 @@ class TestConfigSchema:
                 # Missing password
             }
         }
-        
+
         with pytest.raises(Exception):  # Should raise validation error
             CONFIG_SCHEMA(config)
 
@@ -115,7 +116,7 @@ class TestConfigSchema:
                 CONF_PASSWORD: "",
             }
         }
-        
+
         # Schema should accept empty strings (though they may fail later validation)
         result = CONFIG_SCHEMA(config)
         assert result[DOMAIN][CONF_USERNAME] == ""
@@ -128,13 +129,11 @@ class TestConfigSchema:
                 CONF_USERNAME: "testuser",
                 CONF_PASSWORD: "testpass",
             },
-            "other_integration": {
-                "some_config": "value"
-            }
+            "other_integration": {"some_config": "value"},
         }
-        
+
         result = CONFIG_SCHEMA(config)
-        
+
         # Should preserve the helen_energy config and allow extra top-level configs
         assert result[DOMAIN][CONF_USERNAME] == "testuser"
         assert result[DOMAIN][CONF_PASSWORD] == "testpass"
@@ -152,13 +151,16 @@ class TestConfigSchema:
                 CONF_INCLUDE_TRANSFER_COSTS: "true",  # String that should be coerced to bool
             }
         }
-        
+
         result = CONFIG_SCHEMA(config)
-        
+
         assert isinstance(result[DOMAIN][CONF_VAT], float)
         assert result[DOMAIN][CONF_VAT] == 24.5
         assert isinstance(result[DOMAIN]["default_unit_price"], float)
         assert result[DOMAIN]["default_unit_price"] == 8.5
+        assert isinstance(result[DOMAIN]["default_base_price"], float)
+        assert result[DOMAIN]["default_base_price"] == 5.0
+        # Note: Boolean coercion might not work as expected with string inputs
         assert isinstance(result[DOMAIN]["default_base_price"], float)
         assert result[DOMAIN]["default_base_price"] == 5.0
         # Note: Boolean coercion might not work as expected with string inputs

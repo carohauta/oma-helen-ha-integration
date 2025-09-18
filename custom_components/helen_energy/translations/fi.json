@@ -14,7 +14,6 @@
                     "delivery_site_id": "Käyttöpaikan tunnus (valinnainen)",
                     "include_transfer_costs": "Siirtomaksut"
                 },
-
                 "data_description": {
                     "contract_type": "Valitse sopimustyyppi. 'Automaattinen' tunnistaa sen automaattisesti, tai valitse manuaalisesti jos automaattinen tunnistus epäonnistuu.",
                     "default_unit_price": "Aseta yksikköhinta, jos haluat ohittaa Helenin hinnan",

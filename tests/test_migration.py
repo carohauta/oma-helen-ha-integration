@@ -2,12 +2,11 @@
 
 from unittest.mock import Mock, patch
 
-
 from custom_components.helen_energy.migration import (
+    LEGACY_ENTITY_MAPPINGS,
     get_legacy_entity_name,
     should_preserve_legacy_entity_id,
     should_use_legacy_names,
-    LEGACY_ENTITY_MAPPINGS,
 )
 
 
@@ -16,12 +15,23 @@ class TestMigrationUtilities:
 
     def test_get_legacy_entity_name_known_types(self):
         """Test getting legacy entity names for known sensor types."""
-        assert get_legacy_entity_name("market_price_electricity") == "Helen Market Price Electricity"
-        assert get_legacy_entity_name("exchange_electricity") == "Helen Exchange Electricity"
+        assert (
+            get_legacy_entity_name("market_price_electricity")
+            == "Helen Market Price Electricity"
+        )
+        assert (
+            get_legacy_entity_name("exchange_electricity")
+            == "Helen Exchange Electricity"
+        )
         assert get_legacy_entity_name("smart_guarantee") == "Helen Smart Guarantee"
-        assert get_legacy_entity_name("fixed_price_electricity") == "Helen Fixed Price Electricity"
+        assert (
+            get_legacy_entity_name("fixed_price_electricity")
+            == "Helen Fixed Price Electricity"
+        )
         assert get_legacy_entity_name("transfer_costs") == "Helen Transfer Costs"
-        assert get_legacy_entity_name("monthly_consumption") == "Helen Monthly Consumption"
+        assert (
+            get_legacy_entity_name("monthly_consumption") == "Helen Monthly Consumption"
+        )
 
     def test_get_legacy_entity_name_unknown_type(self):
         """Test getting legacy entity name for unknown sensor type."""
@@ -53,7 +63,10 @@ class TestMigrationUtilities:
         mock_entity_registry = Mock()
         mock_entity_registry.async_get.return_value = Mock(config_entry_id=None)
 
-        with patch("custom_components.helen_energy.migration.er.async_get", return_value=mock_entity_registry):
+        with patch(
+            "custom_components.helen_energy.migration.er.async_get",
+            return_value=mock_entity_registry,
+        ):
             result = should_use_legacy_names(mock_hass, mock_config_entry)
             assert result is True
 
@@ -70,7 +83,10 @@ class TestMigrationUtilities:
         mock_entity_registry = Mock()
         mock_entity_registry.async_get.return_value = None
 
-        with patch("custom_components.helen_energy.migration.er.async_get", return_value=mock_entity_registry):
+        with patch(
+            "custom_components.helen_energy.migration.er.async_get",
+            return_value=mock_entity_registry,
+        ):
             result = should_use_legacy_names(mock_hass, mock_config_entry)
             assert result is False
 
@@ -83,7 +99,10 @@ class TestMigrationUtilities:
         # Mock as second entry
         mock_first_entry = Mock()
         mock_first_entry.entry_id = "first_entry"
-        mock_hass.config_entries.async_entries.return_value = [mock_first_entry, mock_config_entry]
+        mock_hass.config_entries.async_entries.return_value = [
+            mock_first_entry,
+            mock_config_entry,
+        ]
 
         result = should_use_legacy_names(mock_hass, mock_config_entry)
         assert result is False
@@ -98,11 +117,11 @@ class TestLegacyEntityMappings:
             "sensor.helen_market_price_electricity",
             "sensor.helen_exchange_electricity",
             "sensor.helen_smart_guarantee",
-            "sensor.helen_fixed_price_electricity", 
+            "sensor.helen_fixed_price_electricity",
             "sensor.helen_transfer_costs",
             "sensor.helen_monthly_consumption",
         ]
-        
+
         for entity_id in expected_entities:
             assert entity_id in LEGACY_ENTITY_MAPPINGS
             assert isinstance(LEGACY_ENTITY_MAPPINGS[entity_id], str)
@@ -110,9 +129,23 @@ class TestLegacyEntityMappings:
 
     def test_legacy_entity_mappings_values(self):
         """Test that legacy entity mappings have correct values."""
-        assert LEGACY_ENTITY_MAPPINGS["sensor.helen_market_price_electricity"] == "market_price_electricity"
-        assert LEGACY_ENTITY_MAPPINGS["sensor.helen_exchange_electricity"] == "exchange_electricity"
-        assert LEGACY_ENTITY_MAPPINGS["sensor.helen_smart_guarantee"] == "smart_guarantee"
-        assert LEGACY_ENTITY_MAPPINGS["sensor.helen_fixed_price_electricity"] == "fixed_price_electricity"
+        assert (
+            LEGACY_ENTITY_MAPPINGS["sensor.helen_market_price_electricity"]
+            == "market_price_electricity"
+        )
+        assert (
+            LEGACY_ENTITY_MAPPINGS["sensor.helen_exchange_electricity"]
+            == "exchange_electricity"
+        )
+        assert (
+            LEGACY_ENTITY_MAPPINGS["sensor.helen_smart_guarantee"] == "smart_guarantee"
+        )
+        assert (
+            LEGACY_ENTITY_MAPPINGS["sensor.helen_fixed_price_electricity"]
+            == "fixed_price_electricity"
+        )
         assert LEGACY_ENTITY_MAPPINGS["sensor.helen_transfer_costs"] == "transfer_costs"
-        assert LEGACY_ENTITY_MAPPINGS["sensor.helen_monthly_consumption"] == "monthly_consumption"
+        assert (
+            LEGACY_ENTITY_MAPPINGS["sensor.helen_monthly_consumption"]
+            == "monthly_consumption"
+        )

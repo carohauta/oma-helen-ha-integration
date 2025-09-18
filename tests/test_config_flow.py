@@ -2,17 +2,16 @@
 
 from unittest.mock import patch
 
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
 from custom_components.helen_energy.config_flow import HelenConfigFlow
 from custom_components.helen_energy.const import (
-    CONF_VAT,
-    CONF_FIXED_PRICE,
     CONF_CONTRACT_TYPE,
-    CONF_DEFAULT_UNIT_PRICE,
     CONF_DEFAULT_BASE_PRICE,
-    CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
+    CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_VAT,
 )
 
 
@@ -22,34 +21,36 @@ class TestHelenConfigFlow:
     def test_create_unique_id_and_title_with_delivery_site(self):
         """Test unique ID and title creation with delivery site."""
         flow = HelenConfigFlow()
-        
+
         unique_id, title = flow._create_unique_id_and_title("testuser", "12345")
-        
+
         assert unique_id == "testuser_12345"
         assert title == "Helen Energy (12345)"
 
     def test_create_unique_id_and_title_without_delivery_site(self):
         """Test unique ID and title creation without delivery site."""
         flow = HelenConfigFlow()
-        
-        with patch("custom_components.helen_energy.config_flow.time", return_value=123456):
+
+        with patch(
+            "custom_components.helen_energy.config_flow.time", return_value=123456
+        ):
             unique_id, title = flow._create_unique_id_and_title("testuser")
-            
+
             assert unique_id == "testuser_123456"
             assert title == "Helen Energy (testuser)"
 
     def test_build_entry_data_minimal(self):
         """Test building entry data with minimal input."""
         flow = HelenConfigFlow()
-        
+
         user_input = {
             "username": "testuser",
             "password": "testpass",
             "vat": 25.5,
         }
-        
+
         data = flow._build_entry_data(user_input)
-        
+
         assert data[CONF_USERNAME] == "testuser"
         assert data[CONF_PASSWORD] == "testpass"
         assert data[CONF_VAT] == 25.5
@@ -58,7 +59,7 @@ class TestHelenConfigFlow:
     def test_build_entry_data_full(self):
         """Test building entry data with all optional fields."""
         flow = HelenConfigFlow()
-        
+
         user_input = {
             "username": "testuser",
             "password": "testpass",
@@ -69,9 +70,9 @@ class TestHelenConfigFlow:
             "include_transfer_costs": True,
             "contract_type": "fixed",
         }
-        
+
         data = flow._build_entry_data(user_input)
-        
+
         assert data[CONF_USERNAME] == "testuser"
         assert data[CONF_PASSWORD] == "testpass"
         assert data[CONF_VAT] == 25.5

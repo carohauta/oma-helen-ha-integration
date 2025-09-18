@@ -1,3 +1,5 @@
+"""Constants for the Helen Energy integration."""
+
 from typing import Final
 
 DOMAIN: Final = "helen_energy"

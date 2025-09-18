@@ -1,24 +1,24 @@
 """Common test fixtures and helpers for Helen Energy integration."""
 
-import pytest
-from unittest.mock import Mock, AsyncMock
 from datetime import date
 from types import MappingProxyType
+from unittest.mock import AsyncMock, Mock
 
+import pytest
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
-
-# Home Assistant test utilities removed since async tests were removed
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
 from custom_components.helen_energy.const import (
-    DOMAIN,
-    CONF_VAT,
-    CONF_FIXED_PRICE,
-    CONF_DEFAULT_UNIT_PRICE,
     CONF_DEFAULT_BASE_PRICE,
-    CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
+    CONF_FIXED_PRICE,
+    CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_VAT,
+    DOMAIN,
 )
+
+# Home Assistant test utilities removed since async tests were removed
 
 
 @pytest.fixture
@@ -58,13 +58,13 @@ def mock_helen_price_client():
     mock_exchange_prices = Mock()
     mock_exchange_prices.margin = 0.5
     mock_client.get_exchange_prices.return_value = mock_exchange_prices
-    
+
     mock_market_prices = Mock()
     mock_market_prices.last_month = 85.0
     mock_market_prices.current_month = 90.0
     mock_market_prices.next_month = 88.0
     mock_client.get_market_price_prices.return_value = mock_market_prices
-    
+
     return mock_client
 
 
@@ -168,10 +168,12 @@ def mock_hass(tmp_path):
 
 
 @pytest.fixture
-def mock_coordinator(mock_hass, mock_config_entry, mock_helen_api_client, mock_helen_price_client):
+def mock_coordinator(
+    mock_hass, mock_config_entry, mock_helen_api_client, mock_helen_price_client
+):
     """Mock Helen data coordinator."""
     from custom_components.helen_energy.sensor import HelenDataCoordinator
-    
+
     coordinator = HelenDataCoordinator(
         mock_hass,
         mock_config_entry,
@@ -186,11 +188,11 @@ def mock_coordinator(mock_hass, mock_config_entry, mock_helen_api_client, mock_h
 
 class MockDateRange:
     """Mock date range utility."""
-    
+
     @staticmethod
     def get_month_date_range_by_date(target_date: date):
         """Mock month date range."""
         return (
             date(target_date.year, target_date.month, 1),
-            date(target_date.year, target_date.month, 28)
+            date(target_date.year, target_date.month, 28),
         )

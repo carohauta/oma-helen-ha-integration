@@ -4,30 +4,49 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dateutil.relativedelta import relativedelta
 from helenservice.api_client import HelenApiClient
 from helenservice.api_exceptions import InvalidApiResponseException
-from helenservice.api_response import MeasurementResponse
 from helenservice.price_client import HelenPriceClient
 from helenservice.utils import get_month_date_range_by_date
-from homeassistant.components.sensor import (SensorDeviceClass, SensorEntity,
-                                             SensorStateClass)
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfEnergy
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.update_coordinator import (CoordinatorEntity,
-                                                      DataUpdateCoordinator)
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
-from .const import (CONF_CONTRACT_TYPE, CONF_DEFAULT_BASE_PRICE,
-                    CONF_DEFAULT_UNIT_PRICE, CONF_DELIVERY_SITE_ID,
-                    CONF_FIXED_PRICE, CONF_INCLUDE_TRANSFER_COSTS, CONF_VAT,
-                    CONTRACT_TYPE_AUTOMATIC, CONTRACT_TYPE_EXCHANGE,
-                    CONTRACT_TYPE_FIXED, CONTRACT_TYPE_MARKET, DOMAIN)
-from .migration import (async_migrate_entities_for_compatibility,
-                        get_legacy_entity_name, should_use_legacy_names)
+from .const import (
+    CONF_CONTRACT_TYPE,
+    CONF_DEFAULT_BASE_PRICE,
+    CONF_DEFAULT_UNIT_PRICE,
+    CONF_DELIVERY_SITE_ID,
+    CONF_FIXED_PRICE,
+    CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_VAT,
+    CONTRACT_TYPE_AUTOMATIC,
+    CONTRACT_TYPE_EXCHANGE,
+    CONTRACT_TYPE_FIXED,
+    CONTRACT_TYPE_MARKET,
+    DOMAIN,
+)
+from .migration import (
+    async_migrate_entities_for_compatibility,
+    get_legacy_entity_name,
+    should_use_legacy_names,
+)
+
+if TYPE_CHECKING:
+    from helenservice.api_response import MeasurementResponse
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=3)
@@ -41,6 +60,7 @@ def safe_round(value: float | None, decimals: int = 2) -> float:
         return round(float(value), decimals)
     except (TypeError, ValueError):
         return 0.0
+
 
 # common for all contract types
 STATE_ATTR_DAILY_AVERAGE_CONSUMPTION = "daily_average_consumption"
@@ -202,7 +222,10 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             return self.data if self.data is not None else {}
         except Exception as err:
             # For unexpected errors, log but don't fail the update
-            _LOGGER.error("Unexpected error fetching Helen data, keeping last known values: %s", err)
+            _LOGGER.error(
+                "Unexpected error fetching Helen data, keeping last known values: %s",
+                err,
+            )
             # Return the existing data if available, otherwise return empty dict
             return self.data if self.data is not None else {}
         else:
@@ -257,14 +280,16 @@ async def async_setup_entry(
 
     # Perform entity migration to preserve history from legacy installations
     # Only migrate if this is the first Helen Energy entry to avoid conflicts
-    helen_entries = [entry for entry in hass.config_entries.async_entries(DOMAIN)]
+    helen_entries = list(hass.config_entries.async_entries(DOMAIN))
     if len(helen_entries) == 1 and helen_entries[0] == config_entry:
         await async_migrate_entities_for_compatibility(hass, config_entry)
 
     await coordinator.async_config_entry_first_refresh()
 
     # Get user's explicit contract type choice
-    user_contract_type = config_entry.data.get(CONF_CONTRACT_TYPE, CONTRACT_TYPE_AUTOMATIC)
+    user_contract_type = config_entry.data.get(
+        CONF_CONTRACT_TYPE, CONTRACT_TYPE_AUTOMATIC
+    )
 
     entities = []
 
@@ -290,7 +315,9 @@ async def async_setup_entry(
     elif user_contract_type == CONTRACT_TYPE_AUTOMATIC:
         # Fall back to API-based detection for automatic mode
         api_contract_type = coordinator.data.get("contract_type")
-        if api_contract_type is not None and ("PERUS" in api_contract_type or "KAYTTO" in api_contract_type):
+        if api_contract_type is not None and (
+            "PERUS" in api_contract_type or "KAYTTO" in api_contract_type
+        ):
             entities.append(
                 HelenFixedPriceElectricity(
                     coordinator, default_base_price, default_unit_price
@@ -316,7 +343,7 @@ async def async_setup_entry(
             # API contract type is None or unsupported - default to fixed price
             _LOGGER.warning(
                 "Contract type could not be determined from API (got: %s), defaulting to fixed price sensor",
-                api_contract_type
+                api_contract_type,
             )
             entities.append(
                 HelenFixedPriceElectricity(
@@ -327,7 +354,7 @@ async def async_setup_entry(
         # Unknown user contract type - shouldn't happen but default to fixed price
         _LOGGER.warning(
             "Unknown contract type selection '%s', defaulting to fixed price sensor",
-            user_contract_type
+            user_contract_type,
         )
         entities.append(
             HelenFixedPriceElectricity(
@@ -451,14 +478,25 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
 
         # Generate unique ID - add suffix for additional entries
-        helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
-        is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        helen_entries = list(coordinator.hass.config_entries.async_entries(DOMAIN))
+        is_first_entry = (
+            len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        )
 
         if is_first_entry:
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{sensor_type}"
         else:
-            entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
-            self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{sensor_type}_{entry_index + 1}"
+            entry_index = next(
+                (
+                    i
+                    for i, entry in enumerate(helen_entries)
+                    if entry == coordinator.config_entry
+                ),
+                1,
+            )
+            self._attr_unique_id = (
+                f"{coordinator.config_entry.entry_id}_{sensor_type}_{entry_index + 1}"
+            )
 
         # For legacy compatibility, use simple names for first entry,
         # but include distinguishing info for additional entries to avoid conflicts
@@ -466,10 +504,14 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
             self._attr_name = name
         else:
             # Check if this is the first Helen Energy entry for legacy compatibility
-            helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
-            is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+            helen_entries = list(coordinator.hass.config_entries.async_entries(DOMAIN))
+            is_first_entry = (
+                len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+            )
 
-            if is_first_entry and should_use_legacy_names(coordinator.hass, coordinator.config_entry):
+            if is_first_entry and should_use_legacy_names(
+                coordinator.hass, coordinator.config_entry
+            ):
                 # Use legacy names for true migration cases
                 self._attr_name = get_legacy_entity_name(sensor_type)
             elif is_first_entry:
@@ -482,10 +524,19 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
                     suffix = f"Site {delivery_site}"
                 else:
                     # Use entry sequence number (starting from 2)
-                    entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
+                    entry_index = next(
+                        (
+                            i
+                            for i, entry in enumerate(helen_entries)
+                            if entry == coordinator.config_entry
+                        ),
+                        1,
+                    )
                     suffix = str(entry_index + 1)
 
-                self._attr_name = f"Helen {sensor_type.replace('_', ' ').title()} ({suffix})"
+                self._attr_name = (
+                    f"Helen {sensor_type.replace('_', ' ').title()} ({suffix})"
+                )
 
         self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
@@ -505,9 +556,15 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
     def _get_consumption_attributes(self, data: dict[str, Any]) -> dict[str, Any]:
         """Get common consumption attributes."""
         return {
-            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: safe_round(data.get("current_month_consumption", 0)),
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: safe_round(data.get("last_month_consumption", 0)),
-            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: safe_round(data.get("daily_average_consumption", 0)),
+            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: safe_round(
+                data.get("current_month_consumption", 0)
+            ),
+            STATE_ATTR_LAST_MONTH_CONSUMPTION: safe_round(
+                data.get("last_month_consumption", 0)
+            ),
+            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: safe_round(
+                data.get("daily_average_consumption", 0)
+            ),
             STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
         }
 
@@ -569,7 +626,9 @@ class HelenMarketPriceElectricity(HelenBaseSensor):
 
         # Calculate last month total cost
         last_month_price = market_prices.get("last_month", 0) / 100
-        last_month_total_cost = safe_round(last_month_price * last_month_consumption + base_price)
+        last_month_total_cost = safe_round(
+            last_month_price * last_month_consumption + base_price
+        )
 
         # Use default unit price for current month if set
         current_month_price = (
@@ -581,9 +640,15 @@ class HelenMarketPriceElectricity(HelenBaseSensor):
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
             STATE_ATTR_LAST_MONTH_TOTAL_COST: last_month_total_cost,
-            STATE_ATTR_PRICE_LAST_MONTH: safe_round(market_prices.get("last_month")) if market_prices.get("last_month") is not None else None,
-            STATE_ATTR_PRICE_CURRENT_MONTH: safe_round(current_month_price) if current_month_price is not None else None,
-            STATE_ATTR_PRICE_NEXT_MONTH: safe_round(market_prices.get("next_month")) if market_prices.get("next_month") is not None else None,
+            STATE_ATTR_PRICE_LAST_MONTH: safe_round(market_prices.get("last_month"))
+            if market_prices.get("last_month") is not None
+            else None,
+            STATE_ATTR_PRICE_CURRENT_MONTH: safe_round(current_month_price)
+            if current_month_price is not None
+            else None,
+            STATE_ATTR_PRICE_NEXT_MONTH: safe_round(market_prices.get("next_month"))
+            if market_prices.get("next_month") is not None
+            else None,
         }
         attributes.update(self._get_consumption_attributes(data))
         return attributes
@@ -701,9 +766,9 @@ class HelenSmartGuarantee(HelenBaseSensor):
             return self._get_consumption_attributes(data)
 
         unit_price = self._get_unit_price(data)
-        current_month_energy_price_with_impact = safe_round((
-            unit_price + smart_guarantee["current_month_impact"]
-        ) / 100)
+        current_month_energy_price_with_impact = safe_round(
+            (unit_price + smart_guarantee["current_month_impact"]) / 100
+        )
 
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
@@ -778,20 +843,35 @@ class HelenTransferPrice(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
 
         # Generate unique ID - add suffix for additional entries
-        helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
-        is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        helen_entries = list(coordinator.hass.config_entries.async_entries(DOMAIN))
+        is_first_entry = (
+            len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        )
 
         if is_first_entry:
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_transfer_costs"
         else:
-            entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
-            self._attr_unique_id = f"{coordinator.config_entry.entry_id}_transfer_costs_{entry_index + 1}"
+            entry_index = next(
+                (
+                    i
+                    for i, entry in enumerate(helen_entries)
+                    if entry == coordinator.config_entry
+                ),
+                1,
+            )
+            self._attr_unique_id = (
+                f"{coordinator.config_entry.entry_id}_transfer_costs_{entry_index + 1}"
+            )
 
         # Check if this is the first Helen Energy entry for legacy compatibility
-        helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
-        is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        helen_entries = list(coordinator.hass.config_entries.async_entries(DOMAIN))
+        is_first_entry = (
+            len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        )
 
-        if is_first_entry and should_use_legacy_names(coordinator.hass, coordinator.config_entry):
+        if is_first_entry and should_use_legacy_names(
+            coordinator.hass, coordinator.config_entry
+        ):
             # Use legacy names for true migration cases
             self._attr_name = get_legacy_entity_name("transfer_costs")
         elif is_first_entry:
@@ -804,7 +884,14 @@ class HelenTransferPrice(CoordinatorEntity, SensorEntity):
                 suffix = f"Site {delivery_site}"
             else:
                 # Use entry sequence number (starting from 2)
-                entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
+                entry_index = next(
+                    (
+                        i
+                        for i, entry in enumerate(helen_entries)
+                        if entry == coordinator.config_entry
+                    ),
+                    1,
+                )
                 suffix = str(entry_index + 1)
 
             self._attr_name = f"Helen Transfer Costs ({suffix})"
@@ -825,20 +912,35 @@ class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
 
         # Generate unique ID - add suffix for additional entries
-        helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
-        is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        helen_entries = list(coordinator.hass.config_entries.async_entries(DOMAIN))
+        is_first_entry = (
+            len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        )
 
         if is_first_entry:
-            self._attr_unique_id = f"{coordinator.config_entry.entry_id}_monthly_consumption"
+            self._attr_unique_id = (
+                f"{coordinator.config_entry.entry_id}_monthly_consumption"
+            )
         else:
-            entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
+            entry_index = next(
+                (
+                    i
+                    for i, entry in enumerate(helen_entries)
+                    if entry == coordinator.config_entry
+                ),
+                1,
+            )
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_monthly_consumption_{entry_index + 1}"
 
         # Check if this is the first Helen Energy entry for legacy compatibility
-        helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
-        is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        helen_entries = list(coordinator.hass.config_entries.async_entries(DOMAIN))
+        is_first_entry = (
+            len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
+        )
 
-        if is_first_entry and should_use_legacy_names(coordinator.hass, coordinator.config_entry):
+        if is_first_entry and should_use_legacy_names(
+            coordinator.hass, coordinator.config_entry
+        ):
             # Use legacy names for true migration cases
             self._attr_name = get_legacy_entity_name("monthly_consumption")
         elif is_first_entry:
@@ -851,7 +953,14 @@ class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
                 suffix = f"Site {delivery_site}"
             else:
                 # Use entry sequence number (starting from 2)
-                entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
+                entry_index = next(
+                    (
+                        i
+                        for i, entry in enumerate(helen_entries)
+                        if entry == coordinator.config_entry
+                    ),
+                    1,
+                )
                 suffix = str(entry_index + 1)
 
             self._attr_name = f"Helen Monthly Consumption ({suffix})"

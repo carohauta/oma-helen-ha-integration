@@ -4,23 +4,35 @@ from __future__ import annotations
 
 import logging
 from time import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
 from helenservice.api_client import HelenApiClient
-from helenservice.api_exceptions import (HelenAuthenticationException,
-                                         InvalidDeliverySiteException)
+from helenservice.api_exceptions import (
+    HelenAuthenticationException,
+    InvalidDeliverySiteException,
+)
 from helenservice.price_client import HelenPriceClient
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
-from .const import (CONF_CONTRACT_TYPE, CONF_DEFAULT_BASE_PRICE,
-                    CONF_DEFAULT_UNIT_PRICE, CONF_DELIVERY_SITE_ID,
-                    CONF_INCLUDE_TRANSFER_COSTS, CONF_VAT,
-                    CONTRACT_TYPE_AUTOMATIC, CONTRACT_TYPE_EXCHANGE,
-                    CONTRACT_TYPE_FIXED, CONTRACT_TYPE_MARKET, DOMAIN)
+from .const import (
+    CONF_CONTRACT_TYPE,
+    CONF_DEFAULT_BASE_PRICE,
+    CONF_DEFAULT_UNIT_PRICE,
+    CONF_DELIVERY_SITE_ID,
+    CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_VAT,
+    CONTRACT_TYPE_AUTOMATIC,
+    CONTRACT_TYPE_EXCHANGE,
+    CONTRACT_TYPE_FIXED,
+    CONTRACT_TYPE_MARKET,
+    DOMAIN,
+)
+
+if TYPE_CHECKING:
+    from homeassistant.data_entry_flow import FlowResult
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -132,11 +144,12 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # Check if contract type is supported
             supported_types = ["PERUS", "KAYTTO", "MARK", "PORS", "VALTTI"]
-            if any(supported_type in contract_type for supported_type in supported_types):
+            if any(
+                supported_type in contract_type for supported_type in supported_types
+            ):
                 return True, None
-
             return False, contract_type
-        except Exception as ex: # pylint: disable=broad-exception-caught
+        except Exception as ex:
             _LOGGER.warning("Could not validate contract type: %s", ex)
             # If we can't validate due to an exception, also return failure
             return False, None
@@ -172,10 +185,13 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         contract_data_json = await self.hass.async_add_executor_job(
                             self.api_client.get_contract_data_json
                         )
-                        _LOGGER.debug("Contract data JSON during setup: %s", contract_data_json)
-                    except (AttributeError, Exception) as debug_err: # pylint: disable=broad-exception-caught
                         _LOGGER.debug(
-                            "Failed to get contract data JSON during setup: %s", debug_err
+                            "Contract data JSON during setup: %s", contract_data_json
+                        )
+                    except (AttributeError, Exception) as debug_err:
+                        _LOGGER.debug(
+                            "Failed to get contract data JSON during setup: %s",
+                            debug_err,
                         )
 
                 # Validate delivery site if provided
@@ -190,13 +206,18 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     is_supported, contract_type = await self._validate_contract_type()
                     if not is_supported:
                         await self._cleanup_resources()
-                        error_key = ("contract_type_not_detected" if contract_type is None
-                                    else "contract_type_not_resolved")
+                        error_key = (
+                            "contract_type_not_detected"
+                            if contract_type is None
+                            else "contract_type_not_resolved"
+                        )
                         return self.async_show_form(
                             step_id="user",
                             data_schema=self._get_user_schema(user_input),
                             errors={"base": error_key},
-                            description_placeholders={"contract_type": contract_type or "None"}
+                            description_placeholders={
+                                "contract_type": contract_type or "None"
+                            },
                         )
 
                 # Create unique ID and title
@@ -219,7 +240,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ValueError,
             ) as ex:
                 errors = self._handle_errors(ex)
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected error during Helen Energy setup")
                 errors = {"base": "cannot_connect"}
             finally:
@@ -308,10 +329,13 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         contract_data_json = await self.hass.async_add_executor_job(
                             self.api_client.get_contract_data_json
                         )
-                        _LOGGER.debug("Contract data JSON during reauth: %s", contract_data_json)
-                    except (AttributeError, Exception) as debug_err: # pylint: disable=broad-exception-caught
                         _LOGGER.debug(
-                            "Failed to get contract data JSON during reauth: %s", debug_err
+                            "Contract data JSON during reauth: %s", contract_data_json
+                        )
+                    except (AttributeError, Exception) as debug_err:
+                        _LOGGER.debug(
+                            "Failed to get contract data JSON during reauth: %s",
+                            debug_err,
                         )
 
                 # Update entry with new password
@@ -330,7 +354,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ValueError,
             ) as ex:
                 errors = self._handle_errors(ex)
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected error during Helen Energy reauth")
                 errors = {"base": "cannot_connect"}
             finally:
@@ -353,7 +377,9 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             # Validate credentials by creating API client and testing login
-            self.api_client = await self._create_api_client(user_input.get(CONF_VAT, 25.5))
+            self.api_client = await self._create_api_client(
+                user_input.get(CONF_VAT, 25.5)
+            )
             await self._test_authentication(
                 user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
             )
@@ -364,10 +390,13 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     contract_data_json = await self.hass.async_add_executor_job(
                         self.api_client.get_contract_data_json
                     )
-                    _LOGGER.debug("Contract data JSON during YAML import: %s", contract_data_json)
-                except (AttributeError, Exception) as debug_err: # pylint: disable=broad-exception-caught
                     _LOGGER.debug(
-                        "Failed to get contract data JSON during YAML import: %s", debug_err
+                        "Contract data JSON during YAML import: %s", contract_data_json
+                    )
+                except (AttributeError, Exception) as debug_err:
+                    _LOGGER.debug(
+                        "Failed to get contract data JSON during YAML import: %s",
+                        debug_err,
                     )
 
             # Map legacy contract_type to our new contract type selection
@@ -387,7 +416,9 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_PASSWORD: user_input[CONF_PASSWORD],
                 CONF_VAT: user_input.get(CONF_VAT, 25.5),
                 CONF_CONTRACT_TYPE: contract_type,
-                CONF_INCLUDE_TRANSFER_COSTS: user_input.get(CONF_INCLUDE_TRANSFER_COSTS, False),
+                CONF_INCLUDE_TRANSFER_COSTS: user_input.get(
+                    CONF_INCLUDE_TRANSFER_COSTS, False
+                ),
             }
 
             # Add optional fields if present
@@ -399,13 +430,12 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data[CONF_DELIVERY_SITE_ID] = user_input["delivery_site_id"]
 
             return self.async_create_entry(
-                title=f"Helen Energy ({user_input[CONF_USERNAME]})",
-                data=data
+                title=f"Helen Energy ({user_input[CONF_USERNAME]})", data=data
             )
         except HelenAuthenticationException:
             _LOGGER.error("Authentication failed during YAML import")
             return self.async_abort(reason="invalid_auth")
-        except Exception as err: # pylint: disable=broad-exception-caught
+        except Exception as err:
             _LOGGER.error("Unexpected error during YAML import: %s", err)
             return self.async_abort(reason="unknown")
         finally:

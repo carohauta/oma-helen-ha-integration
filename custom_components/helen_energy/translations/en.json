@@ -14,7 +14,6 @@
                     "delivery_site_id": "Delivery site ID (optional)",
                     "include_transfer_costs": "Transfer costs"
                 },
-
                 "data_description": {
                     "contract_type": "Choose your contract type. Select 'Automatic' to detect it automatically, or choose manually if automatic detection fails.",
                     "default_unit_price": "Set the unit price if you want to override Helen's price",

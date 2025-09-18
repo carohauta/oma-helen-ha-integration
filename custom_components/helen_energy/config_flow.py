@@ -17,14 +17,19 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_DEFAULT_BASE_PRICE,
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
-    CONF_FIXED_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
     CONF_VAT,
+    CONF_CONTRACT_TYPE,
+    CONTRACT_TYPE_AUTOMATIC,
+    CONTRACT_TYPE_FIXED,
+    CONTRACT_TYPE_MARKET,
+    CONTRACT_TYPE_EXCHANGE,
     DOMAIN,
 )
 
@@ -93,7 +98,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ("default_base_price", CONF_DEFAULT_BASE_PRICE),
             ("delivery_site_id", CONF_DELIVERY_SITE_ID),
             ("include_transfer_costs", CONF_INCLUDE_TRANSFER_COSTS),
-            ("is_fixed_price", CONF_FIXED_PRICE),
+            (CONF_CONTRACT_TYPE, CONF_CONTRACT_TYPE),
         ]
 
         for input_key, config_key in optional_fields:
@@ -131,6 +136,11 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             contract_type = await self.hass.async_add_executor_job(
                 self.api_client.get_contract_type
             )
+
+            # If contract type is None, we cannot automatically detect it
+            if contract_type is None:
+                return False, None
+
             # Check if contract type is supported
             supported_types = ["PERUS", "KAYTTO", "MARK", "PORS", "VALTTI"]
             if any(supported_type in contract_type for supported_type in supported_types):
@@ -139,8 +149,8 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return False, contract_type
         except Exception as ex: # pylint: disable=broad-exception-caught
             _LOGGER.warning("Could not validate contract type: %s", ex)
-            # If we can't validate, allow the setup to continue
-            return True, None
+            # If we can't validate due to an exception, also return failure
+            return False, None
 
     async def _cleanup_resources(self) -> None:
         """Clean up any initialized resources."""
@@ -174,16 +184,18 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         user_input["delivery_site_id"],
                     )
 
-                # Validate contract type unless fixed price is enabled
-                if not user_input.get("is_fixed_price", False):
+                # Validate contract type only when AUTOMATIC is selected
+                if user_input.get(CONF_CONTRACT_TYPE) == CONTRACT_TYPE_AUTOMATIC:
                     is_supported, contract_type = await self._validate_contract_type()
                     if not is_supported:
                         await self._cleanup_resources()
+                        error_key = ("contract_type_not_detected" if contract_type is None
+                                    else "contract_type_not_resolved")
                         return self.async_show_form(
                             step_id="user",
                             data_schema=self._get_user_schema(user_input),
-                            errors={"base": "unsupported_contract_type"},
-                            description_placeholders={"contract_type": contract_type or "Unknown"}
+                            errors={"base": error_key},
+                            description_placeholders={"contract_type": contract_type or "None"}
                         )
 
                 # Create unique ID and title
@@ -228,7 +240,28 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         vol.Range(min=0.0, max=100.0),
                         msg="VAT percentage must be between 0 and 100",
                     ),
-                    vol.Optional("is_fixed_price", default=False): bool,
+                    vol.Required(
+                        CONF_CONTRACT_TYPE, default=CONTRACT_TYPE_AUTOMATIC
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                selector.SelectOptionDict(
+                                    value=CONTRACT_TYPE_AUTOMATIC, label="automatic"
+                                ),
+                                selector.SelectOptionDict(
+                                    value=CONTRACT_TYPE_FIXED, label="fixed"
+                                ),
+                                selector.SelectOptionDict(
+                                    value=CONTRACT_TYPE_MARKET, label="market"
+                                ),
+                                selector.SelectOptionDict(
+                                    value=CONTRACT_TYPE_EXCHANGE, label="exchange"
+                                ),
+                            ],
+                            mode="list",
+                            translation_key="contract_type",
+                        )
+                    ),
                     vol.Optional("delivery_site_id"): str,
                     vol.Optional("default_unit_price"): vol.All(
                         vol.Coerce(float),
@@ -312,16 +345,23 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
             )
 
-            # Map legacy contract_type to our boolean flags
-            contract_type = user_input.get("contract_type", "").upper()
-            is_fixed_price = contract_type == "FIXED"
+            # Map legacy contract_type to our new contract type selection
+            legacy_contract_type = user_input.get("contract_type", "").upper()
+            if legacy_contract_type == "FIXED":
+                contract_type = CONTRACT_TYPE_FIXED
+            elif legacy_contract_type == "MARKET":
+                contract_type = CONTRACT_TYPE_MARKET
+            elif legacy_contract_type == "EXCHANGE":
+                contract_type = CONTRACT_TYPE_EXCHANGE
+            else:
+                contract_type = CONTRACT_TYPE_AUTOMATIC
 
             # Create config entry data
             data = {
                 CONF_USERNAME: user_input[CONF_USERNAME],
                 CONF_PASSWORD: user_input[CONF_PASSWORD],
                 CONF_VAT: user_input.get(CONF_VAT, 25.5),
-                CONF_FIXED_PRICE: is_fixed_price,
+                CONF_CONTRACT_TYPE: contract_type,
                 CONF_INCLUDE_TRANSFER_COSTS: user_input.get(CONF_INCLUDE_TRANSFER_COSTS, False),
             }
 

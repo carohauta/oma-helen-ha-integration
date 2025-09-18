@@ -8,6 +8,7 @@ from custom_components.helen_energy.config_flow import HelenConfigFlow
 from custom_components.helen_energy.const import (
     CONF_VAT,
     CONF_FIXED_PRICE,
+    CONF_CONTRACT_TYPE,
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DEFAULT_BASE_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
@@ -66,7 +67,7 @@ class TestHelenConfigFlow:
             "default_base_price": 5.0,
             "delivery_site_id": "12345",
             "include_transfer_costs": True,
-            "is_fixed_price": True,
+            "contract_type": "fixed",
         }
         
         data = flow._build_entry_data(user_input)
@@ -78,4 +79,4 @@ class TestHelenConfigFlow:
         assert data[CONF_DEFAULT_BASE_PRICE] == 5.0
         assert data[CONF_DELIVERY_SITE_ID] == "12345"
         assert data[CONF_INCLUDE_TRANSFER_COSTS] == True
-        assert data[CONF_FIXED_PRICE] == True
+        assert data[CONF_CONTRACT_TYPE] == "fixed"

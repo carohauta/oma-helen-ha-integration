@@ -38,6 +38,11 @@ from .const import (
     CONF_VAT,
     CONF_FIXED_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_CONTRACT_TYPE,
+    CONTRACT_TYPE_AUTOMATIC,
+    CONTRACT_TYPE_FIXED,
+    CONTRACT_TYPE_MARKET,
+    CONTRACT_TYPE_EXCHANGE,
     DOMAIN,
 )
 from .migration import (
@@ -280,32 +285,76 @@ async def async_setup_entry(
 
     await coordinator.async_config_entry_first_refresh()
 
-    contract_type = coordinator.data.get("contract_type")
-
+    # Get user's explicit contract type choice
+    user_contract_type = config_entry.data.get(CONF_CONTRACT_TYPE, CONTRACT_TYPE_AUTOMATIC)
+    
     entities = []
 
-    # Add appropriate price sensor based on contract type
-    if is_fixed_price or "PERUS" in contract_type or "KAYTTO" in contract_type:
+    # Determine which sensor to create based on user's choice
+    if user_contract_type == CONTRACT_TYPE_FIXED or is_fixed_price:
         entities.append(
             HelenFixedPriceElectricity(
                 coordinator, default_base_price, default_unit_price
             )
         )
-    elif "MARK" in contract_type:
+    elif user_contract_type == CONTRACT_TYPE_MARKET:
         entities.append(
             HelenMarketPriceElectricity(
                 coordinator, default_base_price, default_unit_price
             )
         )
-    elif "PORS" in contract_type:
+    elif user_contract_type == CONTRACT_TYPE_EXCHANGE:
         if default_unit_price is not None:
             _LOGGER.warning(
                 "Default unit price set but will not be used with EXCHANGE contract"
             )
         entities.append(HelenExchangeElectricity(coordinator, default_base_price))
-    elif "VALTTI" in contract_type:
+    elif user_contract_type == CONTRACT_TYPE_AUTOMATIC:
+        # Fall back to API-based detection for automatic mode
+        api_contract_type = coordinator.data.get("contract_type")
+        if api_contract_type is not None and ("PERUS" in api_contract_type or "KAYTTO" in api_contract_type):
+            entities.append(
+                HelenFixedPriceElectricity(
+                    coordinator, default_base_price, default_unit_price
+                )
+            )
+        elif api_contract_type is not None and "MARK" in api_contract_type:
+            entities.append(
+                HelenMarketPriceElectricity(
+                    coordinator, default_base_price, default_unit_price
+                )
+            )
+        elif api_contract_type is not None and "PORS" in api_contract_type:
+            if default_unit_price is not None:
+                _LOGGER.warning(
+                    "Default unit price set but will not be used with EXCHANGE contract"
+                )
+            entities.append(HelenExchangeElectricity(coordinator, default_base_price))
+        elif api_contract_type is not None and "VALTTI" in api_contract_type:
+            entities.append(
+                HelenSmartGuarantee(coordinator, default_base_price, default_unit_price)
+            )
+        else:
+            # API contract type is None or unsupported - default to fixed price
+            _LOGGER.warning(
+                "Contract type could not be determined from API (got: %s), defaulting to fixed price sensor", 
+                api_contract_type
+            )
+            entities.append(
+                HelenFixedPriceElectricity(
+                    coordinator, default_base_price, default_unit_price
+                )
+            )
+    else:
+        # Unknown user contract type - shouldn't happen but default to fixed price
+        _LOGGER.warning(
+            "Unknown contract type selection '%s', defaulting to fixed price sensor", 
+            user_contract_type
+        )
         entities.append(
-            HelenSmartGuarantee(coordinator, default_base_price, default_unit_price)
+            HelenFixedPriceElectricity(
+                coordinator, default_base_price, default_unit_price
+            )
         )
 
     # Add optional sensors

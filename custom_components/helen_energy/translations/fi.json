@@ -12,15 +12,15 @@
                     "default_unit_price": "Yliaja yksikköhinta (c/kWh, valinnainen)",
                     "default_base_price": "Yliaja perusmaksu (EUR/kk, valinnainen)",
                     "delivery_site_id": "Käyttöpaikan tunnus (valinnainen)",
-                    "include_transfer_costs": "Siirtomaksut",
-                    "is_fixed_price": "Kiinteä hinta"
+                    "include_transfer_costs": "Siirtomaksut"
                 },
+
                 "data_description": {
+                    "contract_type": "Valitse sopimustyyppi. 'Automaattinen' tunnistaa sen automaattisesti, tai valitse manuaalisesti jos automaattinen tunnistus epäonnistuu.",
                     "default_unit_price": "Aseta yksikköhinta, jos haluat ohittaa Helenin hinnan",
                     "default_base_price": "Aseta perusmaksu, jos haluat ohittaa Helenin perusmaksun",
                     "delivery_site_id": "Jos sinulla on useita käyttöpaikkoja, syötä seurattavan käyttöpaikan tunnus",
-                    "include_transfer_costs": "Valitse, jos halua seurata myös sähkönsiirtokuluja",
-                    "is_fixed_price": "Valitse, jos haluat pakottaa kiinteähintaisen sopimustyypin. Esimerkiksi, jos sinulla on sopimus, jota ei vielä tueta"
+                    "include_transfer_costs": "Valitse, jos halua seurata myös sähkönsiirtokuluja"
                 }
             },
             "reauth_confirm": {
@@ -32,12 +32,23 @@
             "cannot_connect": "Yhteys Oma Heleniin epäonnistui. Tarkista internet-yhteytesi ja yritä uudelleen. Jos ongelma jatkuu, palvelu saattaa olla tilapäisesti pois käytöstä.",
             "invalid_auth": "Virheellinen käyttäjätunnus tai salasana. Tarkista tunnukset ja yritä uudelleen.",
             "invalid_delivery_site_id": "Virheellinen käyttöpaikan tunnus. Tarkista, että tunnus on olemassa.",
-            "unsupported_contract_type": "Sopimustyyppiäsi '{contract_type}' ei vielä tueta. Voit valita 'Kiinteä hinta' -valintaruudun ja antaa kiinteät hinnat alla olevissa Yliaja-kentissä.",
+            "contract_type_not_detected": "Sopimustyyppiä ei voitu tunnistaa. Valitse sopimustyyppi manuaalisesti.",
+            "contract_type_not_resolved": "Sopimustyyppiä '{contract_type}' ei voitu tunnistaa luotettavasti. Valitse sopimustyyppi manuaalisesti.",
             "unknown": "Odottamaton virhe tapahtui. Tarkista lokit saadaksesi lisätietoja."
         },
         "abort": {
             "already_configured": "Tili on jo määritetty",
             "reauth_successful": "Uudelleentunnistautuminen onnistui"
+        }
+    },
+    "selector": {
+        "contract_type": {
+            "options": {
+                "automatic": "Automaattinen",
+                "fixed": "Kiinteähintainen",
+                "market": "Markkinahinta-sähkö",
+                "exchange": "Pörssisähkö"
+            }
         }
     }
 }

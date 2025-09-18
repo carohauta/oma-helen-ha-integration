@@ -1,7 +1,7 @@
 .PHONY: test test-cov clean install-dev test-debug test-file help
 
 # Default Python interpreter
-PYTHON := python3
+PYTHON := python
 
 # Install development dependencies
 install-dev:
@@ -10,11 +10,11 @@ install-dev:
 
 # Run all tests
 test:
-	pytest tests/ -v
+	$(PYTHON) -m pytest tests/ -v
 
 # Run tests with coverage report
 test-cov:
-	pytest tests/ -v --cov=custom_components.helen_energy --cov-report=term-missing --cov-report=html
+	$(PYTHON) -m pytest tests/ -v --cov=custom_components.helen_energy --cov-report=term-missing --cov-report=html
 
 # Generate coverage report and open in browser (macOS)
 test-cov-open: test-cov
@@ -39,11 +39,11 @@ test-file:
 		echo "Usage: make test-file FILE=test_sensor.py"; \
 		exit 1; \
 	fi
-	pytest tests/$(FILE) -v
+	$(PYTHON) -m pytest tests/$(FILE) -v
 
 # Debug mode - run tests with pdb on failure
 test-debug:
-	pytest tests/ -v --pdb
+	$(PYTHON) -m pytest tests/ -v --pdb
 
 # Show help
 help:

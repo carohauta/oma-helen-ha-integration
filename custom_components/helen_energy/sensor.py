@@ -102,18 +102,6 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             )
             _select_delivery_site(self.api_client, self.delivery_site_id)
 
-            # Debug logging: Log contract data when debug logging is enabled
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                try: 
-                    contract_data_json = await self.hass.async_add_executor_job(
-                        self.api_client.get_contract_data_json
-                    )
-                    _LOGGER.debug("Contract data JSON: %s", contract_data_json)
-                except (AttributeError, InvalidApiResponseException) as debug_err:
-                    _LOGGER.debug(
-                        "Failed to get contract data JSON for debugging: %s", debug_err
-                    )
-
             # Get all the data we need
             data = {
                 "current_month_consumption": await _get_total_consumption_for_current_month(
@@ -227,7 +215,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     """Set up Helen Energy sensor platform (legacy YAML support)."""
     # Suppress unused argument warnings - these are required by the platform interface
     _ = hass, config, async_add_entities, discovery_info
-    
+
     _LOGGER.warning(
         "Platform setup for Helen Energy is deprecated and no longer supported. "
         "Please remove the 'helen_energy' platform from your sensor configuration "
@@ -277,7 +265,7 @@ async def async_setup_entry(
 
     # Get user's explicit contract type choice
     user_contract_type = config_entry.data.get(CONF_CONTRACT_TYPE, CONTRACT_TYPE_AUTOMATIC)
-    
+
     entities = []
 
     # Determine which sensor to create based on user's choice
@@ -327,7 +315,7 @@ async def async_setup_entry(
         else:
             # API contract type is None or unsupported - default to fixed price
             _LOGGER.warning(
-                "Contract type could not be determined from API (got: %s), defaulting to fixed price sensor", 
+                "Contract type could not be determined from API (got: %s), defaulting to fixed price sensor",
                 api_contract_type
             )
             entities.append(
@@ -338,7 +326,7 @@ async def async_setup_entry(
     else:
         # Unknown user contract type - shouldn't happen but default to fixed price
         _LOGGER.warning(
-            "Unknown contract type selection '%s', defaulting to fixed price sensor", 
+            "Unknown contract type selection '%s', defaulting to fixed price sensor",
             user_contract_type
         )
         entities.append(
@@ -461,18 +449,18 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        
+
         # Generate unique ID - add suffix for additional entries
         helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
         is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
-        
+
         if is_first_entry:
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{sensor_type}"
         else:
             entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{sensor_type}_{entry_index + 1}"
-        
-        # For legacy compatibility, use simple names for first entry, 
+
+        # For legacy compatibility, use simple names for first entry,
         # but include distinguishing info for additional entries to avoid conflicts
         if name:
             self._attr_name = name
@@ -480,7 +468,7 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
             # Check if this is the first Helen Energy entry for legacy compatibility
             helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
             is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
-            
+
             if is_first_entry and should_use_legacy_names(coordinator.hass, coordinator.config_entry):
                 # Use legacy names for true migration cases
                 self._attr_name = get_legacy_entity_name(sensor_type)
@@ -496,9 +484,9 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
                     # Use entry sequence number (starting from 2)
                     entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
                     suffix = str(entry_index + 1)
-                
+
                 self._attr_name = f"Helen {sensor_type.replace('_', ' ').title()} ({suffix})"
-        
+
         self._default_base_price = default_base_price
         self._default_unit_price = default_unit_price
 
@@ -788,21 +776,21 @@ class HelenTransferPrice(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: HelenDataCoordinator) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        
+
         # Generate unique ID - add suffix for additional entries
         helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
         is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
-        
+
         if is_first_entry:
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_transfer_costs"
         else:
             entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_transfer_costs_{entry_index + 1}"
-        
+
         # Check if this is the first Helen Energy entry for legacy compatibility
         helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
         is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
-        
+
         if is_first_entry and should_use_legacy_names(coordinator.hass, coordinator.config_entry):
             # Use legacy names for true migration cases
             self._attr_name = get_legacy_entity_name("transfer_costs")
@@ -818,7 +806,7 @@ class HelenTransferPrice(CoordinatorEntity, SensorEntity):
                 # Use entry sequence number (starting from 2)
                 entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
                 suffix = str(entry_index + 1)
-            
+
             self._attr_name = f"Helen Transfer Costs ({suffix})"
 
     @property
@@ -835,21 +823,21 @@ class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: HelenDataCoordinator) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        
+
         # Generate unique ID - add suffix for additional entries
         helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
         is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
-        
+
         if is_first_entry:
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_monthly_consumption"
         else:
             entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
             self._attr_unique_id = f"{coordinator.config_entry.entry_id}_monthly_consumption_{entry_index + 1}"
-        
+
         # Check if this is the first Helen Energy entry for legacy compatibility
         helen_entries = [entry for entry in coordinator.hass.config_entries.async_entries(DOMAIN)]
         is_first_entry = len(helen_entries) >= 1 and helen_entries[0] == coordinator.config_entry
-        
+
         if is_first_entry and should_use_legacy_names(coordinator.hass, coordinator.config_entry):
             # Use legacy names for true migration cases
             self._attr_name = get_legacy_entity_name("monthly_consumption")
@@ -865,7 +853,7 @@ class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
                 # Use entry sequence number (starting from 2)
                 entry_index = next((i for i, entry in enumerate(helen_entries) if entry == coordinator.config_entry), 1)
                 suffix = str(entry_index + 1)
-            
+
             self._attr_name = f"Helen Monthly Consumption ({suffix})"
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING

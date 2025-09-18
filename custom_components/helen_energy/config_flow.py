@@ -53,7 +53,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Test authentication with Helen API."""
         if self.api_client is None:
             raise ValueError("API client not initialized")
- 
+
         await self.hass.async_add_executor_job(
             self.api_client.login_and_init, username, password
         )
@@ -165,6 +165,18 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self._test_authentication(
                     user_input["username"], user_input["password"]
                 )
+
+                # Debug logging: Log contract data when debug logging is enabled
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    try:
+                        contract_data_json = await self.hass.async_add_executor_job(
+                            self.api_client.get_contract_data_json
+                        )
+                        _LOGGER.debug("Contract data JSON during setup: %s", contract_data_json)
+                    except (AttributeError, Exception) as debug_err: # pylint: disable=broad-exception-caught
+                        _LOGGER.debug(
+                            "Failed to get contract data JSON during setup: %s", debug_err
+                        )
 
                 # Validate delivery site if provided
                 if "delivery_site_id" in user_input:
@@ -290,6 +302,18 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     entry.data[CONF_USERNAME], user_input["password"]
                 )
 
+                # Debug logging: Log contract data when debug logging is enabled
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    try:
+                        contract_data_json = await self.hass.async_add_executor_job(
+                            self.api_client.get_contract_data_json
+                        )
+                        _LOGGER.debug("Contract data JSON during reauth: %s", contract_data_json)
+                    except (AttributeError, Exception) as debug_err: # pylint: disable=broad-exception-caught
+                        _LOGGER.debug(
+                            "Failed to get contract data JSON during reauth: %s", debug_err
+                        )
+
                 # Update entry with new password
                 new_data = dict(entry.data)
                 new_data[CONF_PASSWORD] = user_input["password"]
@@ -333,6 +357,18 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self._test_authentication(
                 user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
             )
+
+            # Debug logging: Log contract data when debug logging is enabled
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                try:
+                    contract_data_json = await self.hass.async_add_executor_job(
+                        self.api_client.get_contract_data_json
+                    )
+                    _LOGGER.debug("Contract data JSON during YAML import: %s", contract_data_json)
+                except (AttributeError, Exception) as debug_err: # pylint: disable=broad-exception-caught
+                    _LOGGER.debug(
+                        "Failed to get contract data JSON during YAML import: %s", debug_err
+                    )
 
             # Map legacy contract_type to our new contract type selection
             legacy_contract_type = user_input.get("contract_type", "").upper()

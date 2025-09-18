@@ -12,5 +12,5 @@
   "requirements": [
     "oma-helen-cli==1.4.0"
   ],
-  "version": "2.0.2"
+  "version": "2.0.3"
 }

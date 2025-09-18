@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform, CONF_USERNAME, CONF_PASSWORD
-from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
+from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, CONF_VAT, CONF_INCLUDE_TRANSFER_COSTS
+from .const import CONF_INCLUDE_TRANSFER_COSTS, CONF_VAT, DOMAIN
 from .migration import async_migrate_entry
 
 _LOGGER = logging.getLogger(__name__)

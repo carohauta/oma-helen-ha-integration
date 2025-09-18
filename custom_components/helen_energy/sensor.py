@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 import logging
+from datetime import date, timedelta
 from typing import Any
 
 from dateutil.relativedelta import relativedelta
@@ -12,44 +12,22 @@ from helenservice.api_exceptions import InvalidApiResponseException
 from helenservice.api_response import MeasurementResponse
 from helenservice.price_client import HelenPriceClient
 from helenservice.utils import get_month_date_range_by_date
-
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorStateClass,
-    SensorEntity,
-)
+from homeassistant.components.sensor import (SensorDeviceClass, SensorEntity,
+                                             SensorStateClass)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    CONF_PASSWORD,
-    CONF_USERNAME,
-    UnitOfEnergy,
-)
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
+from homeassistant.helpers.update_coordinator import (CoordinatorEntity,
+                                                      DataUpdateCoordinator)
 
-from .const import (
-    CONF_DEFAULT_BASE_PRICE,
-    CONF_DEFAULT_UNIT_PRICE,
-    CONF_DELIVERY_SITE_ID,
-    CONF_VAT,
-    CONF_FIXED_PRICE,
-    CONF_INCLUDE_TRANSFER_COSTS,
-    CONF_CONTRACT_TYPE,
-    CONTRACT_TYPE_AUTOMATIC,
-    CONTRACT_TYPE_FIXED,
-    CONTRACT_TYPE_MARKET,
-    CONTRACT_TYPE_EXCHANGE,
-    DOMAIN,
-)
-from .migration import (
-    async_migrate_entities_for_compatibility,
-    get_legacy_entity_name,
-    should_use_legacy_names,
-)
+from .const import (CONF_CONTRACT_TYPE, CONF_DEFAULT_BASE_PRICE,
+                    CONF_DEFAULT_UNIT_PRICE, CONF_DELIVERY_SITE_ID,
+                    CONF_FIXED_PRICE, CONF_INCLUDE_TRANSFER_COSTS, CONF_VAT,
+                    CONTRACT_TYPE_AUTOMATIC, CONTRACT_TYPE_EXCHANGE,
+                    CONTRACT_TYPE_FIXED, CONTRACT_TYPE_MARKET, DOMAIN)
+from .migration import (async_migrate_entities_for_compatibility,
+                        get_legacy_entity_name, should_use_legacy_names)
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=3)
@@ -123,6 +101,18 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 self.hass, self.api_client, self.credentials
             )
             _select_delivery_site(self.api_client, self.delivery_site_id)
+
+            # Debug logging: Log contract data when debug logging is enabled
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                try: 
+                    contract_data_json = await self.hass.async_add_executor_job(
+                        self.api_client.get_contract_data_json
+                    )
+                    _LOGGER.debug("Contract data JSON: %s", contract_data_json)
+                except (AttributeError, InvalidApiResponseException) as debug_err:
+                    _LOGGER.debug(
+                        "Failed to get contract data JSON for debugging: %s", debug_err
+                    )
 
             # Get all the data we need
             data = {

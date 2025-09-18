@@ -6,32 +6,21 @@ import logging
 from time import time
 from typing import Any
 
-from helenservice.api_client import HelenApiClient
-from helenservice.api_exceptions import (
-    HelenAuthenticationException,
-    InvalidDeliverySiteException,
-)
-from helenservice.price_client import HelenPriceClient
 import voluptuous as vol
-
+from helenservice.api_client import HelenApiClient
+from helenservice.api_exceptions import (HelenAuthenticationException,
+                                         InvalidDeliverySiteException)
+from helenservice.price_client import HelenPriceClient
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
-from .const import (
-    CONF_DEFAULT_BASE_PRICE,
-    CONF_DEFAULT_UNIT_PRICE,
-    CONF_DELIVERY_SITE_ID,
-    CONF_INCLUDE_TRANSFER_COSTS,
-    CONF_VAT,
-    CONF_CONTRACT_TYPE,
-    CONTRACT_TYPE_AUTOMATIC,
-    CONTRACT_TYPE_FIXED,
-    CONTRACT_TYPE_MARKET,
-    CONTRACT_TYPE_EXCHANGE,
-    DOMAIN,
-)
+from .const import (CONF_CONTRACT_TYPE, CONF_DEFAULT_BASE_PRICE,
+                    CONF_DEFAULT_UNIT_PRICE, CONF_DELIVERY_SITE_ID,
+                    CONF_INCLUDE_TRANSFER_COSTS, CONF_VAT,
+                    CONTRACT_TYPE_AUTOMATIC, CONTRACT_TYPE_EXCHANGE,
+                    CONTRACT_TYPE_FIXED, CONTRACT_TYPE_MARKET, DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +53,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Test authentication with Helen API."""
         if self.api_client is None:
             raise ValueError("API client not initialized")
-
+ 
         await self.hass.async_add_executor_job(
             self.api_client.login_and_init, username, password
         )

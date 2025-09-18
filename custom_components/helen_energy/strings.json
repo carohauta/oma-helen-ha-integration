@@ -1,0 +1,12 @@
+    {
+        "selector": {
+            "contract_type": {
+                "options": {
+                    "automatic": "Automatic (detect from API)",
+                    "fixed": "Fixed price",
+                    "market": "Market price",
+                    "exchange": "Exchange price"
+                }
+            }
+        }
+    }

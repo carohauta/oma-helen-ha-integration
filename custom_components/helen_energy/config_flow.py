@@ -229,7 +229,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 # Build entry data and create entry
                 data = self._build_entry_data(user_input)
-                await self._cleanup_resources()
+                # Don't cleanup resources on success - let sensor reuse the session
                 return self.async_create_entry(title=title, data=data)
 
             except (
@@ -344,7 +344,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 self.hass.config_entries.async_update_entry(entry, data=new_data)
                 await self.hass.config_entries.async_reload(entry.entry_id)
-                await self._cleanup_resources()
+                # Don't cleanup resources on successful reauth - let sensor reuse the session
                 return self.async_abort(reason="reauth_successful")
 
             except (
@@ -429,14 +429,17 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if "delivery_site_id" in user_input:
                 data[CONF_DELIVERY_SITE_ID] = user_input["delivery_site_id"]
 
+            # Don't cleanup resources on success - let sensor reuse the session
             return self.async_create_entry(
                 title=f"Helen Energy ({user_input[CONF_USERNAME]})", data=data
             )
         except HelenAuthenticationException:
             _LOGGER.error("Authentication failed during YAML import")
+            await self._cleanup_resources()
             return self.async_abort(reason="invalid_auth")
         except Exception as err:
             _LOGGER.error("Unexpected error during YAML import: %s", err)
-            return self.async_abort(reason="unknown")
-        finally:
+            _LOGGER.error("Exception traceback:", exc_info=True)
+
             await self._cleanup_resources()
+            return self.async_abort(reason="unknown")

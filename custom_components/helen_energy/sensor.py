@@ -123,35 +123,57 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             _select_delivery_site(self.api_client, self.delivery_site_id)
 
             # Get all the data we need
-            data = {
-                "current_month_consumption": await _get_total_consumption_for_current_month(
-                    self.hass, self.api_client
-                ),
-                "last_month_consumption": await _get_total_consumption_for_last_month(
-                    self.hass, self.api_client
-                ),
-                "daily_average_consumption": await _get_average_daily_consumption_for_current_month(
-                    self.hass, self.api_client
-                ),
-                "transfer_costs": await get_transfer_price_total_for_current_month(
+            _LOGGER.debug("Starting data fetch from Helen API")
+
+            data = {}
+
+            _LOGGER.debug("Fetching current month consumption")
+            data[
+                "current_month_consumption"
+            ] = await _get_total_consumption_for_current_month(
+                self.hass, self.api_client
+            )
+
+            _LOGGER.debug("Fetching last month consumption")
+            data[
+                "last_month_consumption"
+            ] = await _get_total_consumption_for_last_month(self.hass, self.api_client)
+
+            _LOGGER.debug("Fetching daily average consumption")
+            data[
+                "daily_average_consumption"
+            ] = await _get_average_daily_consumption_for_current_month(
+                self.hass, self.api_client
+            )
+
+            if self.include_transfer_costs:
+                _LOGGER.debug("Fetching transfer costs")
+                data[
+                    "transfer_costs"
+                ] = await get_transfer_price_total_for_current_month(
                     self.hass, self.api_client
                 )
-                if self.include_transfer_costs
-                else 0.0,
-                "contract_base_price": await self.hass.async_add_executor_job(
-                    self.api_client.get_contract_base_price
-                ),
-                "contract_type": await self.hass.async_add_executor_job(
-                    self.api_client.get_contract_type
-                ),
-            }
+            else:
+                data["transfer_costs"] = 0.0
+
+            _LOGGER.debug("Fetching contract base price")
+            data["contract_base_price"] = await self.hass.async_add_executor_job(
+                self.api_client.get_contract_base_price
+            )
+
+            _LOGGER.debug("Fetching contract type")
+            data["contract_type"] = await self.hass.async_add_executor_job(
+                self.api_client.get_contract_type
+            )
 
             # Get prices based on contract type
             try:
+                _LOGGER.debug("Fetching unit price")
                 data["unit_price"] = await self.hass.async_add_executor_job(
                     self.api_client.get_contract_energy_unit_price
                 )
-            except InvalidApiResponseException:
+            except InvalidApiResponseException as e:
+                _LOGGER.debug("Failed to get unit price: %s", e)
                 data["unit_price"] = None
 
             # Get market prices if needed
@@ -159,12 +181,16 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 prices = await self.hass.async_add_executor_job(
                     self.price_client.get_market_price_prices
                 )
-                data["market_prices"] = {
-                    "last_month": getattr(prices, "last_month", None),
-                    "current_month": getattr(prices, "current_month", None),
-                    "next_month": getattr(prices, "next_month", None),
-                }
-            except (InvalidApiResponseException, AttributeError):
+                if prices is not None:
+                    data["market_prices"] = {
+                        "last_month": getattr(prices, "last_month", None),
+                        "current_month": getattr(prices, "current_month", None),
+                        "next_month": getattr(prices, "next_month", None),
+                    }
+                else:
+                    data["market_prices"] = None
+            except (InvalidApiResponseException, AttributeError) as e:
+                _LOGGER.debug("Failed to get market prices: %s", e)
                 data["market_prices"] = None
 
             # Get exchange prices if needed
@@ -172,8 +198,12 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 exchange_prices = await self.hass.async_add_executor_job(
                     self.price_client.get_exchange_prices
                 )
-                data["exchange_prices"] = {"margin": exchange_prices.margin}
-            except (InvalidApiResponseException, AttributeError):
+                if exchange_prices is not None:
+                    data["exchange_prices"] = {"margin": exchange_prices.margin}
+                else:
+                    data["exchange_prices"] = None
+            except (InvalidApiResponseException, AttributeError) as e:
+                _LOGGER.debug("Failed to get exchange prices: %s", e)
                 data["exchange_prices"] = None
 
             # Calculate spot price costs for exchange electricity
@@ -226,6 +256,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 "Unexpected error fetching Helen data, keeping last known values: %s",
                 err,
             )
+            _LOGGER.error("Exception traceback:", exc_info=True)
             # Return the existing data if available, otherwise return empty dict
             return self.data if self.data is not None else {}
         else:

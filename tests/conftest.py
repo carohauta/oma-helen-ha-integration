@@ -33,17 +33,11 @@ def mock_helen_api_client():
     mock_client.get_contract_type.return_value = "PERUS"
     mock_client.get_contract_energy_unit_price.return_value = 8.5
     mock_client.get_daily_measurements_between_dates.return_value = Mock(
-        intervals=Mock(
-            electricity=[
-                Mock(
-                    measurements=[
-                        Mock(value=10.5, status="valid"),
-                        Mock(value=12.3, status="valid"),
-                        Mock(value=9.8, status="valid"),
-                    ]
-                )
-            ]
-        )
+        series=[
+            Mock(electricity=10.5),
+            Mock(electricity=12.3),
+            Mock(electricity=9.8),
+        ]
     )
     mock_client.calculate_transfer_fees_between_dates.return_value = 15.0
     mock_client.calculate_total_costs_by_spot_prices_between_dates.return_value = 25.5

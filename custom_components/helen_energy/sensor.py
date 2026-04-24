@@ -44,7 +44,7 @@ from .migration import (
 )
 
 if TYPE_CHECKING:
-    from helenservice.api_response import MeasurementResponse
+    from helenservice.api_response import MeasurementsWithSpotPriceResponse
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
@@ -426,14 +426,14 @@ async def _get_total_consumption_between_dates(
     end_date: date,
 ) -> float:
     """Get total consumption between two dates."""
-    measurement_response: MeasurementResponse = await hass.async_add_executor_job(
+    measurement_response: MeasurementsWithSpotPriceResponse = await hass.async_add_executor_job(
         helen_api_client.get_daily_measurements_between_dates, start_date, end_date
     )
-    if not measurement_response.intervals.electricity:
+    if not measurement_response.series:
         return 0.0
     total = sum(
-        m.value if m.status == "valid" else 0.0
-        for m in measurement_response.intervals.electricity[0].measurements
+        entry.electricity for entry in measurement_response.series
+        if entry.electricity is not None
     )
     return safe_round(total)
 
@@ -475,15 +475,15 @@ async def _get_average_daily_consumption_for_current_month(
 ):
     """Get average daily consumption for current month."""
     start_date, end_date = get_month_date_range_by_date(date.today())
-    measurement_response: MeasurementResponse = await hass.async_add_executor_job(
+    measurement_response: MeasurementsWithSpotPriceResponse = await hass.async_add_executor_job(
         helen_api_client.get_daily_measurements_between_dates, start_date, end_date
     )
-    if not measurement_response.intervals.electricity:
+    if not measurement_response.series:
         return 0
     valid_measurements = [
-        m.value
-        for m in measurement_response.intervals.electricity[0].measurements
-        if m.status == "valid"
+        entry.electricity
+        for entry in measurement_response.series
+        if entry.electricity is not None
     ]
     average = (
         sum(valid_measurements) / len(valid_measurements) if valid_measurements else 0

@@ -16,7 +16,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfEnergy
+from homeassistant.const import UnitOfEnergy
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -30,7 +30,6 @@ from .const import (
     CONF_DELIVERY_SITE_ID,
     CONF_FIXED_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
-    CONF_VAT,
     CONTRACT_TYPE_AUTOMATIC,
     CONTRACT_TYPE_EXCHANGE,
     CONTRACT_TYPE_FIXED,
@@ -38,7 +37,6 @@ from .const import (
     DOMAIN,
 )
 from .migration import (
-    async_migrate_entities_for_compatibility,
     get_legacy_entity_name,
     should_use_legacy_names,
 )
@@ -282,40 +280,12 @@ async def async_setup_entry(
     hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities
 ) -> None:
     """Set up the Helen Energy sensors from a config entry."""
-    username = config_entry.data[CONF_USERNAME]
-    password = config_entry.data[CONF_PASSWORD]
-    vat = config_entry.data[CONF_VAT] / 100
+    coordinator: HelenDataCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+
     is_fixed_price = config_entry.data.get(CONF_FIXED_PRICE, False)
     default_unit_price = config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)
     default_base_price = config_entry.data.get(CONF_DEFAULT_BASE_PRICE)
     include_transfer_costs = config_entry.data.get(CONF_INCLUDE_TRANSFER_COSTS)
-    delivery_site_id = config_entry.data.get(CONF_DELIVERY_SITE_ID)
-
-    helen_price_client = HelenPriceClient()
-    # Get exchange prices in executor to avoid blocking
-    exchange_prices = await hass.async_add_executor_job(
-        helen_price_client.get_exchange_prices
-    )
-    helen_api_client = HelenApiClient(vat, exchange_prices.margin)
-    credentials = {"username": username, "password": password}
-
-    coordinator = HelenDataCoordinator(
-        hass,
-        config_entry,
-        helen_api_client,
-        helen_price_client,
-        credentials,
-        delivery_site_id,
-        include_transfer_costs,
-    )
-
-    # Perform entity migration to preserve history from legacy installations
-    # Only migrate if this is the first Helen Energy entry to avoid conflicts
-    helen_entries = list(hass.config_entries.async_entries(DOMAIN))
-    if len(helen_entries) == 1 and helen_entries[0] == config_entry:
-        await async_migrate_entities_for_compatibility(hass, config_entry)
-
-    await coordinator.async_config_entry_first_refresh()
 
     # Get user's explicit contract type choice
     user_contract_type = config_entry.data.get(

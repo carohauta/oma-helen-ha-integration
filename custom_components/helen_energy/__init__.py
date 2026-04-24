@@ -7,10 +7,17 @@ from typing import TYPE_CHECKING, Any
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
+from helenservice.api_client import HelenApiClient
+from helenservice.price_client import HelenPriceClient
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 
-from .const import CONF_INCLUDE_TRANSFER_COSTS, CONF_VAT, DOMAIN
-from .migration import async_migrate_entry
+from .const import (
+    CONF_DELIVERY_SITE_ID,
+    CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_VAT,
+    DOMAIN,
+)
+from .migration import async_migrate_entry, async_migrate_entities_for_compatibility
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -83,10 +90,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not await async_migrate_entry(hass, entry):
             return False
 
+    from .sensor import HelenDataCoordinator
+
+    vat = entry.data[CONF_VAT] / 100
+    delivery_site_id = entry.data.get(CONF_DELIVERY_SITE_ID)
+    include_transfer_costs = entry.data.get(CONF_INCLUDE_TRANSFER_COSTS)
+    credentials = {
+        "username": entry.data[CONF_USERNAME],
+        "password": entry.data[CONF_PASSWORD],
+    }
+
+    helen_price_client = HelenPriceClient()
+    exchange_prices = await hass.async_add_executor_job(
+        helen_price_client.get_exchange_prices
+    )
+    helen_api_client = HelenApiClient(vat, exchange_prices.margin)
+
+    coordinator = HelenDataCoordinator(
+        hass,
+        entry,
+        helen_api_client,
+        helen_price_client,
+        credentials,
+        delivery_site_id,
+        include_transfer_costs,
+    )
+
+    # Perform entity migration to preserve history from legacy installations.
+    # Only migrate if this is the first Helen Energy entry to avoid conflicts.
+    helen_entries = list(hass.config_entries.async_entries(DOMAIN))
+    if len(helen_entries) == 1 and helen_entries[0] == entry:
+        await async_migrate_entities_for_compatibility(hass, entry)
+
+    # Must be called while the entry is still in SETUP_IN_PROGRESS state.
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        hass.data[DOMAIN].pop(entry.entry_id)
+    return unloaded

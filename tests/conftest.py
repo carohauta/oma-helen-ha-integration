@@ -148,7 +148,7 @@ def mock_hass(tmp_path):
     hass.async_add_executor_job = AsyncMock()
     hass.config_entries = Mock()
     hass.config_entries.async_entries.return_value = []
-    hass.data = {}
+    hass.data = {"helen_energy": {}}
     hass.states = Mock()
     hass.states.get = Mock(return_value=None)
     hass.states.async_set = AsyncMock()
@@ -177,6 +177,7 @@ def mock_coordinator(
         delivery_site_id=None,
         include_transfer_costs=False,
     )
+    mock_hass.data["helen_energy"][mock_config_entry.entry_id] = coordinator
     return coordinator
 
 

@@ -396,13 +396,16 @@ async def _get_total_consumption_between_dates(
     end_date: date,
 ) -> float:
     """Get total consumption between two dates."""
-    measurement_response: MeasurementsWithSpotPriceResponse = await hass.async_add_executor_job(
-        helen_api_client.get_daily_measurements_between_dates, start_date, end_date
+    measurement_response: MeasurementsWithSpotPriceResponse = (
+        await hass.async_add_executor_job(
+            helen_api_client.get_daily_measurements_between_dates, start_date, end_date
+        )
     )
     if not measurement_response.series:
         return 0.0
     total = sum(
-        entry.electricity for entry in measurement_response.series
+        entry.electricity
+        for entry in measurement_response.series
         if entry.electricity is not None
     )
     return safe_round(total)
@@ -445,8 +448,10 @@ async def _get_average_daily_consumption_for_current_month(
 ):
     """Get average daily consumption for current month."""
     start_date, end_date = get_month_date_range_by_date(date.today())
-    measurement_response: MeasurementsWithSpotPriceResponse = await hass.async_add_executor_job(
-        helen_api_client.get_daily_measurements_between_dates, start_date, end_date
+    measurement_response: MeasurementsWithSpotPriceResponse = (
+        await hass.async_add_executor_job(
+            helen_api_client.get_daily_measurements_between_dates, start_date, end_date
+        )
     )
     if not measurement_response.series:
         return 0

@@ -1,7 +1,5 @@
 # Test requirements for Helen Energy integration
 pytest-homeassistant-custom-component==0.13.205
-pytest-asyncio==0.23.8
-pytest-cov>=4.0.0
 
 # Mocking and testing utilities
 responses>=0.22.0

@@ -10,11 +10,11 @@ install-dev:
 
 # Run all tests
 test:
-	$(PYTHON) -m pytest tests/ -v
+	$(PYTHON) -m pytest tests/
 
-# Run tests with coverage report
+# Run tests with coverage report (coverage flags are set in pytest.ini)
 test-cov:
-	$(PYTHON) -m pytest tests/ -v --cov=custom_components.helen_energy --cov-report=term-missing --cov-report=html
+	$(PYTHON) -m pytest tests/
 
 # Generate coverage report and open in browser (macOS)
 test-cov-open: test-cov

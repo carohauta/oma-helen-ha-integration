@@ -1,12 +1,10 @@
 """Common test fixtures and helpers for Helen Energy integration."""
 
-from datetime import date
-from types import MappingProxyType
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock, patch
 
 import pytest
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.helen_energy.const import (
     CONF_DEFAULT_BASE_PRICE,
@@ -17,8 +15,6 @@ from custom_components.helen_energy.const import (
     CONF_VAT,
     DOMAIN,
 )
-
-# Home Assistant test utilities removed since async tests were removed
 
 
 @pytest.fixture
@@ -64,10 +60,8 @@ def mock_helen_price_client():
 
 @pytest.fixture
 def mock_config_entry():
-    """Mock config entry."""
-    return ConfigEntry(
-        version=1,
-        minor_version=1,
+    """Mock config entry using MockConfigEntry."""
+    return MockConfigEntry(
         domain=DOMAIN,
         title="Helen Energy (testuser)",
         data={
@@ -80,20 +74,14 @@ def mock_config_entry():
             CONF_INCLUDE_TRANSFER_COSTS: False,
             CONF_DELIVERY_SITE_ID: None,
         },
-        source="user",
-        entry_id="test_entry_id",
         unique_id="testuser_12345",
-        options={},
-        discovery_keys=MappingProxyType({}),
     )
 
 
 @pytest.fixture
 def mock_config_entry_with_transfer_costs():
     """Mock config entry with transfer costs enabled."""
-    return ConfigEntry(
-        version=1,
-        minor_version=1,
+    return MockConfigEntry(
         domain=DOMAIN,
         title="Helen Energy (testuser)",
         data={
@@ -106,17 +94,13 @@ def mock_config_entry_with_transfer_costs():
             CONF_INCLUDE_TRANSFER_COSTS: True,
             CONF_DELIVERY_SITE_ID: "12345",
         },
-        source="user",
-        entry_id="test_entry_id",
-        unique_id="testuser_12345",
-        options={},
-        discovery_keys=MappingProxyType({}),
+        unique_id="testuser_12345_transfer",
     )
 
 
 @pytest.fixture
 def mock_coordinator_data():
-    """Mock coordinator data."""
+    """Mock coordinator data matching what HelenDataCoordinator._async_update_data returns."""
     return {
         "current_month_consumption": 150.5,
         "last_month_consumption": 145.2,
@@ -132,8 +116,8 @@ def mock_coordinator_data():
         },
         "exchange_prices": {"margin": 0.5},
         "exchange_costs": {
-            "current_month": 25,
-            "last_month": 23,
+            "current_month": 25.0,
+            "last_month": 23.0,
         },
         "smart_guarantee": {
             "current_month_impact": 1.2,
@@ -142,52 +126,27 @@ def mock_coordinator_data():
 
 
 @pytest.fixture
-def mock_hass(tmp_path):
-    """Mock Home Assistant instance."""
-    hass = Mock()
-    hass.async_add_executor_job = AsyncMock()
-    hass.config_entries = Mock()
-    hass.config_entries.async_entries.return_value = []
-    hass.data = {"helen_energy": {}}
-    hass.states = Mock()
-    hass.states.get = Mock(return_value=None)
-    hass.states.async_set = AsyncMock()
-    hass.bus = Mock()
-    hass.bus.async_fire = AsyncMock()
-    hass.loop = Mock()
-    hass.config = Mock()
-    hass.config.time_zone = "UTC"
-    hass.config.config_dir = str(tmp_path)  # Use a real path for storage
-    return hass
+async def mock_api_setup(enable_custom_integrations, mock_helen_api_client, mock_helen_price_client):
+    """Patch HelenApiClient and HelenPriceClient so async_setup_entry doesn't make real HTTP calls.
 
-
-@pytest.fixture
-def mock_coordinator(
-    mock_hass, mock_config_entry, mock_helen_api_client, mock_helen_price_client
-):
-    """Mock Helen data coordinator."""
-    from custom_components.helen_energy.sensor import HelenDataCoordinator
-
-    coordinator = HelenDataCoordinator(
-        mock_hass,
-        mock_config_entry,
-        mock_helen_api_client,
-        mock_helen_price_client,
-        {"username": "test", "password": "test"},
-        delivery_site_id=None,
-        include_transfer_costs=False,
-    )
-    mock_hass.data["helen_energy"][mock_config_entry.entry_id] = coordinator
-    return coordinator
-
-
-class MockDateRange:
-    """Mock date range utility."""
-
-    @staticmethod
-    def get_month_date_range_by_date(target_date: date):
-        """Mock month date range."""
-        return (
-            date(target_date.year, target_date.month, 1),
-            date(target_date.year, target_date.month, 28),
-        )
+    Depends on enable_custom_integrations (which needs hass) so must be async.
+    """
+    with (
+        patch(
+            "custom_components.helen_energy.HelenApiClient",
+            return_value=mock_helen_api_client,
+        ),
+        patch(
+            "custom_components.helen_energy.HelenPriceClient",
+            return_value=mock_helen_price_client,
+        ),
+        patch(
+            "custom_components.helen_energy.sensor.HelenApiClient",
+            return_value=mock_helen_api_client,
+        ),
+        patch(
+            "custom_components.helen_energy.sensor.HelenPriceClient",
+            return_value=mock_helen_price_client,
+        ),
+    ):
+        yield mock_helen_api_client, mock_helen_price_client

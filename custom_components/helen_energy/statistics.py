@@ -14,7 +14,7 @@ from helenservice.api_response import (
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
 from homeassistant.components.recorder.statistics import (
-    async_import_statistics,
+    async_add_external_statistics,
     get_last_statistics,
 )
 from homeassistant.const import UnitOfEnergy
@@ -54,9 +54,14 @@ class HelenStatisticsManager:
         self.hass = hass
         self.api_client = api_client
         self.entity_id = entity_id
+
+        # Create statistic_id in domain:object_id format for external statistics
+        self.statistic_id = f"{DOMAIN}:monthly_consumption"
+
         _LOGGER.debug(
-            "Initialized HelenStatisticsManager for %s with %d hour backfill",
+            "Initialized HelenStatisticsManager for %s with statistic_id %s (%d hour backfill)",
             entity_id,
+            self.statistic_id,
             STATISTICS_BACKFILL_HOURS,
         )
 
@@ -153,13 +158,13 @@ class HelenStatisticsManager:
                 get_last_statistics,
                 self.hass,
                 1,  # number of stats to retrieve
-                self.entity_id,  # statistic_id
+                self.statistic_id,  # statistic_id
                 True,  # convert_units
                 {"sum"},  # types to retrieve
             )
 
-            if self.entity_id in last_stats and last_stats[self.entity_id]:
-                last_sum = last_stats[self.entity_id][0].get("sum", 0.0)
+            if self.statistic_id in last_stats and last_stats[self.statistic_id]:
+                last_sum = last_stats[self.statistic_id][0].get("sum", 0.0)
                 return safe_round(last_sum)
 
             _LOGGER.debug("No existing statistics found, starting from 0.0")
@@ -277,11 +282,11 @@ class HelenStatisticsManager:
         metadata = StatisticMetaData(
             has_mean=False,
             has_sum=True,
-            name="Helen Monthly Consumption",
+            name="Helen Energy Monthly Consumption",
             source=DOMAIN,
-            statistic_id=self.entity_id,
+            statistic_id=self.statistic_id,
             unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         )
 
-        async_import_statistics(self.hass, metadata, statistics)
-        _LOGGER.debug("Statistics imported successfully")
+        async_add_external_statistics(self.hass, metadata, statistics)
+        _LOGGER.debug("Statistics imported successfully for %s", self.statistic_id)

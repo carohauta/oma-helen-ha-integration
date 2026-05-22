@@ -65,6 +65,7 @@ class TestHelenStatisticsManager:
         assert manager.hass == hass
         assert manager.api_client == mock_api_client
         assert manager.entity_id == "sensor.helen_monthly_consumption"
+        assert manager.statistic_id == "helen_energy:monthly_consumption"
 
     def test_convert_to_utc(self, hass: HomeAssistant, mock_api_client):
         """Test timezone conversion from Helsinki to UTC."""
@@ -282,9 +283,9 @@ class TestHelenStatisticsManager:
         manager = HelenStatisticsManager(
             hass, mock_api_client, "sensor.helen_monthly_consumption"        )
 
-        # Create async mock
+        # Create async mock - return stats with the new statistic_id format
         async def async_get_stats(*args, **kwargs):
-            return {"sensor.helen_monthly_consumption": [{"sum": 1234.56}]}
+            return {"helen_energy:monthly_consumption": [{"sum": 1234.56}]}
 
         # Mock get_instance and get_last_statistics to return existing stat
         mock_instance = Mock()
@@ -317,13 +318,13 @@ class TestHelenStatisticsManager:
             }
         ]
 
-        # Mock async_import_statistics
+        # Mock async_add_external_statistics
         with patch(
-            "custom_components.helen_energy.statistics.async_import_statistics"
+            "custom_components.helen_energy.statistics.async_add_external_statistics"
         ) as mock_import:
             await manager._import_statistics(test_statistics)
 
-            # Verify async_import_statistics was called
+            # Verify async_add_external_statistics was called
             assert mock_import.called
             call_args = mock_import.call_args
 
@@ -332,16 +333,16 @@ class TestHelenStatisticsManager:
             if isinstance(metadata, dict):
                 assert metadata["has_mean"] is False
                 assert metadata["has_sum"] is True
-                assert metadata["name"] == "Helen Monthly Consumption"
+                assert metadata["name"] == "Helen Energy Monthly Consumption"
                 assert metadata["source"] == "helen_energy"
-                assert metadata["statistic_id"] == "sensor.helen_monthly_consumption"
+                assert metadata["statistic_id"] == "helen_energy:monthly_consumption"
                 assert metadata["unit_of_measurement"] == UnitOfEnergy.KILO_WATT_HOUR
             else:
                 assert metadata.has_mean is False
                 assert metadata.has_sum is True
-                assert metadata.name == "Helen Monthly Consumption"
+                assert metadata.name == "Helen Energy Monthly Consumption"
                 assert metadata.source == "helen_energy"
-                assert metadata.statistic_id == "sensor.helen_monthly_consumption"
+                assert metadata.statistic_id == "helen_energy:monthly_consumption"
                 assert metadata.unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
 
             # Verify statistics data

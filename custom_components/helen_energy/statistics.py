@@ -258,7 +258,7 @@ class HelenStatisticsManager:
     def _extract_electricity_value(
         self, entry: MeasurementsWithSpotPriceSeries
     ) -> float | None:
-        """Extract electricity value with fallback handling.
+        """Extract electricity value from measurement entry.
 
         Args:
             entry: Measurement series entry
@@ -266,12 +266,7 @@ class HelenStatisticsManager:
         Returns:
             Electricity value in kWh, or None if missing
         """
-        # Try electricity field first, fallback to electricity_transfer
-        if entry.electricity is not None:
-            return entry.electricity
-        if entry.electricity_transfer is not None:
-            return entry.electricity_transfer
-        return None
+        return entry.electricity
 
     async def _import_statistics(self, statistics: list[StatisticData]) -> None:
         """Import statistics into Home Assistant database.

@@ -84,25 +84,17 @@ class TestHelenStatisticsManager:
         assert utc_result.hour == 9  # 12:00 +3 = 09:00 UTC
 
     def test_extract_electricity_value(self, hass: HomeAssistant, mock_api_client):
-        """Test electricity value extraction with fallback."""
+        """Test extracting electricity value from measurement entry."""
         manager = HelenStatisticsManager(
             hass, mock_api_client, "sensor.test"        )
 
-        # Test with electricity field
-        entry = Mock(electricity=10.5, electricity_transfer=None)
-        assert manager._extract_electricity_value(entry) == 10.5
+        # Test with electricity value present
+        entry = Mock(electricity=5.5)
+        assert manager._extract_electricity_value(entry) == 5.5
 
-        # Test with electricity_transfer fallback
-        entry = Mock(electricity=None, electricity_transfer=8.3)
-        assert manager._extract_electricity_value(entry) == 8.3
-
-        # Test with both None
-        entry = Mock(electricity=None, electricity_transfer=None)
+        # Test with None (missing data)
+        entry = Mock(electricity=None)
         assert manager._extract_electricity_value(entry) is None
-
-        # Test with both present (electricity takes precedence)
-        entry = Mock(electricity=10.5, electricity_transfer=8.3)
-        assert manager._extract_electricity_value(entry) == 10.5
 
     def test_build_statistics_cumulative_calculation(
         self, hass: HomeAssistant, mock_api_client, mock_measurement_series

@@ -20,7 +20,7 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, STATISTICS_BACKFILL_HOURS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +43,6 @@ class HelenStatisticsManager:
         hass: HomeAssistant,
         api_client: HelenApiClient,
         entity_id: str,
-        backfill_hours: int = 72,
     ) -> None:
         """Initialize the statistics manager.
 
@@ -51,16 +50,14 @@ class HelenStatisticsManager:
             hass: Home Assistant instance
             api_client: Helen API client instance
             entity_id: Entity ID of the consumption sensor
-            backfill_hours: Number of hours to backfill (default: 72 = 3 days)
         """
         self.hass = hass
         self.api_client = api_client
         self.entity_id = entity_id
-        self.backfill_hours = backfill_hours
         _LOGGER.debug(
             "Initialized HelenStatisticsManager for %s with %d hour backfill",
             entity_id,
-            backfill_hours,
+            STATISTICS_BACKFILL_HOURS,
         )
 
     async def import_recent_statistics(self) -> None:
@@ -69,7 +66,7 @@ class HelenStatisticsManager:
 
         try:
             # Fetch 15-minute interval data for the backfill period
-            series = await self._fetch_interval_data(self.backfill_hours)
+            series = await self._fetch_interval_data()
 
             if not series:
                 _LOGGER.warning("No interval data received from API")
@@ -105,19 +102,18 @@ class HelenStatisticsManager:
             raise
 
     async def _fetch_interval_data(
-        self, hours_back: int
+        self,
     ) -> list[MeasurementsWithSpotPriceSeries]:
         """Fetch 15-minute interval data from API.
 
-        Args:
-            hours_back: Number of hours to fetch backwards from now
+        Uses STATISTICS_BACKFILL_HOURS constant to determine how far back to fetch.
 
         Returns:
             List of measurement series with 15-minute intervals
         """
         # Calculate date range
         end_date = date.today()
-        start_date = end_date - timedelta(days=hours_back // 24 + 1)
+        start_date = end_date - timedelta(days=STATISTICS_BACKFILL_HOURS // 24 + 1)
 
         _LOGGER.debug(
             "Fetching 15-minute interval data from %s to %s", start_date, end_date

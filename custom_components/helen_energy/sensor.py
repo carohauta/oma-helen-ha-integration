@@ -31,12 +31,10 @@ from .const import (
     CONF_ENABLE_STATISTICS_IMPORT,
     CONF_FIXED_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
-    CONF_STATISTICS_BACKFILL_HOURS,
     CONTRACT_TYPE_AUTOMATIC,
     CONTRACT_TYPE_EXCHANGE,
     CONTRACT_TYPE_FIXED,
     CONTRACT_TYPE_MARKET,
-    DEFAULT_STATISTICS_BACKFILL_HOURS,
     DOMAIN,
 )
 from .migration import (
@@ -102,7 +100,6 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         delivery_site_id: str | None = None,
         include_transfer_costs: bool = False,
         enable_statistics_import: bool = True,
-        statistics_backfill_hours: int = DEFAULT_STATISTICS_BACKFILL_HOURS,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -146,12 +143,10 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 hass,
                 helen_api_client,
                 entity_id,
-                statistics_backfill_hours,
             )
             _LOGGER.debug(
-                "Statistics manager initialized for %s with %d hour backfill",
+                "Statistics manager initialized for %s",
                 entity_id,
-                statistics_backfill_hours,
             )
 
     async def _async_update_data(self):

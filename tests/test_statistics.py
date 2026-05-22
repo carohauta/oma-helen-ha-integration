@@ -60,19 +60,16 @@ class TestHelenStatisticsManager:
             hass,
             mock_api_client,
             "sensor.helen_monthly_consumption",
-            backfill_hours=72,
         )
 
         assert manager.hass == hass
         assert manager.api_client == mock_api_client
         assert manager.entity_id == "sensor.helen_monthly_consumption"
-        assert manager.backfill_hours == 72
 
     def test_convert_to_utc(self, hass: HomeAssistant, mock_api_client):
         """Test timezone conversion from Helsinki to UTC."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.test"        )
 
         # Test winter time (UTC+2)
         helsinki_winter = "2024-01-15T12:00:00+02:00"
@@ -89,8 +86,7 @@ class TestHelenStatisticsManager:
     def test_extract_electricity_value(self, hass: HomeAssistant, mock_api_client):
         """Test electricity value extraction with fallback."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.test"        )
 
         # Test with electricity field
         entry = Mock(electricity=10.5, electricity_transfer=None)
@@ -113,8 +109,7 @@ class TestHelenStatisticsManager:
     ):
         """Test cumulative total calculation from interval data."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.test"        )
 
         # Start with cumulative total of 100 kWh
         last_cumulative = 100.0
@@ -146,8 +141,7 @@ class TestHelenStatisticsManager:
     ):
         """Test handling of missing data (None values)."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.test"        )
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
         base_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=helsinki_tz)
@@ -186,8 +180,7 @@ class TestHelenStatisticsManager:
     ):
         """Test filtering of future data (critical - API returns predictions)."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.test"        )
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
 
@@ -229,8 +222,7 @@ class TestHelenStatisticsManager:
     ):
         """Test proper timezone conversion in statistics."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.test"        )
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
         helsinki_time = datetime(2024, 1, 15, 12, 0, 0, tzinfo=helsinki_tz)
@@ -257,8 +249,7 @@ class TestHelenStatisticsManager:
     ):
         """Test fetching 15-minute interval data from API."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.test"        )
 
         # Create async mock for executor job
         async def async_return(func, *args, **kwargs):
@@ -266,7 +257,7 @@ class TestHelenStatisticsManager:
 
         # Mock the API call
         with patch.object(hass, "async_add_executor_job", side_effect=async_return):
-            series = await manager._fetch_interval_data(72)
+            series = await manager._fetch_interval_data()
 
         # Verify we got the series data
         assert len(series) == 10
@@ -277,8 +268,7 @@ class TestHelenStatisticsManager:
     ):
         """Test getting last cumulative total when no statistics exist."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.test"        )
 
         # Mock get_instance and get_last_statistics to return empty result
         mock_instance = Mock()
@@ -298,8 +288,7 @@ class TestHelenStatisticsManager:
     ):
         """Test getting last cumulative total from existing statistics."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.helen_monthly_consumption", backfill_hours=72
-        )
+            hass, mock_api_client, "sensor.helen_monthly_consumption"        )
 
         # Create async mock
         async def async_get_stats(*args, **kwargs):
@@ -326,7 +315,6 @@ class TestHelenStatisticsManager:
             hass,
             mock_api_client,
             "sensor.helen_monthly_consumption",
-            backfill_hours=72,
         )
 
         test_statistics = [

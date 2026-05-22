@@ -19,5 +19,4 @@ CONTRACT_TYPE_EXCHANGE: Final = "exchange"
 
 # Statistics import configuration
 CONF_ENABLE_STATISTICS_IMPORT: Final = "enable_statistics_import"
-CONF_STATISTICS_BACKFILL_HOURS: Final = "statistics_backfill_hours"
-DEFAULT_STATISTICS_BACKFILL_HOURS: Final = 72  # 3 days
+STATISTICS_BACKFILL_HOURS: Final = 72  # Hard-coded, not user-configurable

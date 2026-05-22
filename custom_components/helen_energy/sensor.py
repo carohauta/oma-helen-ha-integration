@@ -28,18 +28,22 @@ from .const import (
     CONF_DEFAULT_BASE_PRICE,
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
+    CONF_ENABLE_STATISTICS_IMPORT,
     CONF_FIXED_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_STATISTICS_BACKFILL_HOURS,
     CONTRACT_TYPE_AUTOMATIC,
     CONTRACT_TYPE_EXCHANGE,
     CONTRACT_TYPE_FIXED,
     CONTRACT_TYPE_MARKET,
+    DEFAULT_STATISTICS_BACKFILL_HOURS,
     DOMAIN,
 )
 from .migration import (
     get_legacy_entity_name,
     should_use_legacy_names,
 )
+from .statistics import HelenStatisticsManager
 
 if TYPE_CHECKING:
     from helenservice.api_response import MeasurementsWithSpotPriceResponse
@@ -97,6 +101,8 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         credentials: dict[str, str],
         delivery_site_id: str | None = None,
         include_transfer_costs: bool = False,
+        enable_statistics_import: bool = True,
+        statistics_backfill_hours: int = DEFAULT_STATISTICS_BACKFILL_HOURS,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -111,6 +117,42 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         self.credentials = credentials
         self.delivery_site_id = delivery_site_id
         self.include_transfer_costs = include_transfer_costs
+
+        # Initialize statistics manager if enabled
+        self.statistics_manager: HelenStatisticsManager | None = None
+        if enable_statistics_import:
+            # Generate entity_id for monthly consumption sensor
+            # For the first entry, use the standard entity ID
+            helen_entries = list(hass.config_entries.async_entries(DOMAIN))
+            is_first_entry = (
+                len(helen_entries) >= 1 and helen_entries[0] == config_entry
+            )
+
+            if is_first_entry:
+                entity_id = "sensor.helen_monthly_consumption"
+            else:
+                # For additional entries, construct entity_id with suffix
+                entry_index = next(
+                    (
+                        i
+                        for i, entry in enumerate(helen_entries)
+                        if entry == config_entry
+                    ),
+                    1,
+                )
+                entity_id = f"sensor.helen_monthly_consumption_{entry_index + 1}"
+
+            self.statistics_manager = HelenStatisticsManager(
+                hass,
+                helen_api_client,
+                entity_id,
+                statistics_backfill_hours,
+            )
+            _LOGGER.debug(
+                "Statistics manager initialized for %s with %d hour backfill",
+                entity_id,
+                statistics_backfill_hours,
+            )
 
     async def _async_update_data(self):
         """Fetch data from Helen API."""
@@ -258,6 +300,20 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             # Return the existing data if available, otherwise return empty dict
             return self.data if self.data is not None else {}
         else:
+            # Import statistics after successful data fetch
+            if self.statistics_manager:
+                try:
+                    await self.statistics_manager.import_recent_statistics()
+                    _LOGGER.debug("Successfully imported energy statistics")
+                except InvalidApiResponseException as err:
+                    # Follow existing error pattern - log warning but don't fail
+                    _LOGGER.warning("Statistics import API error: %s", err)
+                except Exception as err:
+                    _LOGGER.error(
+                        "Unexpected error importing statistics: %s", err, exc_info=True
+                    )
+                    # Don't fail coordinator update
+
             return data
         finally:
             self.api_client.close()

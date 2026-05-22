@@ -13,8 +13,11 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 
 from .const import (
     CONF_DELIVERY_SITE_ID,
+    CONF_ENABLE_STATISTICS_IMPORT,
     CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_STATISTICS_BACKFILL_HOURS,
     CONF_VAT,
+    DEFAULT_STATISTICS_BACKFILL_HOURS,
     DOMAIN,
 )
 from .migration import async_migrate_entry, async_migrate_entities_for_compatibility
@@ -95,6 +98,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     vat = entry.data[CONF_VAT] / 100
     delivery_site_id = entry.data.get(CONF_DELIVERY_SITE_ID)
     include_transfer_costs = entry.data.get(CONF_INCLUDE_TRANSFER_COSTS)
+
+    # Read statistics configuration (from options first, then data, with defaults)
+    enable_statistics_import = entry.options.get(
+        CONF_ENABLE_STATISTICS_IMPORT,
+        entry.data.get(CONF_ENABLE_STATISTICS_IMPORT, True),  # Default: enabled
+    )
+    statistics_backfill_hours = entry.options.get(
+        CONF_STATISTICS_BACKFILL_HOURS,
+        entry.data.get(
+            CONF_STATISTICS_BACKFILL_HOURS, DEFAULT_STATISTICS_BACKFILL_HOURS
+        ),
+    )
+
     credentials = {
         "username": entry.data[CONF_USERNAME],
         "password": entry.data[CONF_PASSWORD],
@@ -114,6 +130,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         credentials,
         delivery_site_id,
         include_transfer_costs,
+        enable_statistics_import,
+        statistics_backfill_hours,
     )
 
     # Perform entity migration to preserve history from legacy installations.

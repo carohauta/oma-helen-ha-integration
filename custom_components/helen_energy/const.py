@@ -16,3 +16,8 @@ CONTRACT_TYPE_AUTOMATIC: Final = "automatic"
 CONTRACT_TYPE_FIXED: Final = "fixed"
 CONTRACT_TYPE_MARKET: Final = "market"
 CONTRACT_TYPE_EXCHANGE: Final = "exchange"
+
+# Statistics import configuration
+CONF_ENABLE_STATISTICS_IMPORT: Final = "enable_statistics_import"
+CONF_STATISTICS_BACKFILL_HOURS: Final = "statistics_backfill_hours"
+DEFAULT_STATISTICS_BACKFILL_HOURS: Final = 72  # 3 days

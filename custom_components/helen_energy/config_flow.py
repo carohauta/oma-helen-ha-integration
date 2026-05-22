@@ -22,12 +22,15 @@ from .const import (
     CONF_DEFAULT_BASE_PRICE,
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
+    CONF_ENABLE_STATISTICS_IMPORT,
     CONF_INCLUDE_TRANSFER_COSTS,
+    CONF_STATISTICS_BACKFILL_HOURS,
     CONF_VAT,
     CONTRACT_TYPE_AUTOMATIC,
     CONTRACT_TYPE_EXCHANGE,
     CONTRACT_TYPE_FIXED,
     CONTRACT_TYPE_MARKET,
+    DEFAULT_STATISTICS_BACKFILL_HOURS,
     DOMAIN,
 )
 
@@ -105,6 +108,14 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         for input_key, config_key in optional_fields:
             if input_key in user_input:
                 data[config_key] = user_input[input_key]
+
+        # Add statistics import defaults (enabled by default for new installations)
+        data[CONF_ENABLE_STATISTICS_IMPORT] = user_input.get(
+            CONF_ENABLE_STATISTICS_IMPORT, True
+        )
+        data[CONF_STATISTICS_BACKFILL_HOURS] = user_input.get(
+            CONF_STATISTICS_BACKFILL_HOURS, DEFAULT_STATISTICS_BACKFILL_HOURS
+        )
 
         return data
 

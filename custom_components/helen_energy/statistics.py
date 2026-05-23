@@ -176,6 +176,42 @@ class HelenStatisticsManager:
             )
             return 0.0
 
+    def _aggregate_to_hourly(
+        self, series: list[MeasurementsWithSpotPriceSeries]
+    ) -> dict[datetime, float]:
+        """Aggregate 15-minute interval data to hourly totals.
+
+        Args:
+            series: List of 15-minute measurement intervals
+
+        Returns:
+            Dictionary mapping hourly timestamps to total kWh for that hour
+        """
+        hourly_totals: dict[datetime, float] = {}
+
+        for entry in series:
+            # Parse timestamp
+            try:
+                interval_time = self._convert_to_utc(entry.start)
+            except Exception as err:
+                _LOGGER.warning("Failed to parse timestamp %s: %s", entry.start, err)
+                continue
+
+            # Round down to the top of the hour
+            hour_timestamp = interval_time.replace(minute=0, second=0, microsecond=0)
+
+            # Extract electricity value
+            electricity = self._extract_electricity_value(entry)
+            if electricity is None:
+                continue
+
+            # Add to hourly total
+            if hour_timestamp not in hourly_totals:
+                hourly_totals[hour_timestamp] = 0.0
+            hourly_totals[hour_timestamp] += electricity
+
+        return hourly_totals
+
     def _build_statistics_from_intervals(
         self,
         series: list[MeasurementsWithSpotPriceSeries],
@@ -183,60 +219,49 @@ class HelenStatisticsManager:
     ) -> list[StatisticData]:
         """Build cumulative statistics from interval data.
 
+        Aggregates 15-minute intervals to hourly totals before creating statistics.
+
         Args:
-            series: List of measurement intervals from API
+            series: List of 15-minute measurement intervals from API
             last_cumulative: Last known cumulative total
 
         Returns:
             List of StatisticData objects ready for import
         """
+        # Step 1: Aggregate to hourly totals
+        hourly_totals = self._aggregate_to_hourly(series)
+
+        # Step 2: Build statistics from hourly totals
         statistics = []
         cumulative = last_cumulative
         now_utc = datetime.now(ZoneInfo("UTC"))
         future_count = 0
-        missing_count = 0
 
-        for entry in series:
-            # Parse timestamp and convert to UTC
-            try:
-                utc_time = self._convert_to_utc(entry.start)
-            except Exception as err:
-                _LOGGER.warning("Failed to parse timestamp %s: %s", entry.start, err)
-                continue
-
-            # Filter out future data (API can return predictions)
-            if utc_time > now_utc:
+        # Sort hourly timestamps to ensure chronological order
+        for hour_timestamp in sorted(hourly_totals.keys()):
+            # Filter out future data
+            if hour_timestamp > now_utc:
                 future_count += 1
                 continue
 
-            # Extract electricity value (with fallback to electricity_transfer)
-            electricity = self._extract_electricity_value(entry)
-
-            # Skip missing data
-            if electricity is None:
-                missing_count += 1
-                continue
-
-            # Add interval to cumulative total
-            cumulative += electricity
+            # Add hourly total to cumulative
+            cumulative += hourly_totals[hour_timestamp]
 
             # Create statistics data point
             statistics.append(
                 StatisticData(
-                    start=utc_time,
+                    start=hour_timestamp,
                     state=safe_round(cumulative),
                     sum=safe_round(cumulative),
                 )
             )
 
-        # Log filtering results
+        # Log results
         if future_count > 0:
-            _LOGGER.debug("Filtered out %d future intervals", future_count)
-        if missing_count > 0:
-            _LOGGER.debug("Skipped %d intervals with missing data", missing_count)
+            _LOGGER.debug("Filtered out %d future hourly intervals", future_count)
 
         _LOGGER.debug(
-            "Built %d statistics entries (cumulative: %.2f kWh)",
+            "Built %d hourly statistics entries (cumulative: %.2f kWh)",
             len(statistics),
             cumulative,
         )
@@ -279,6 +304,8 @@ class HelenStatisticsManager:
         Args:
             statistics: List of StatisticData to import
         """
+        # TODO: Add mean_type=StatisticMeanType.NONE when upgrading to HA 2026.11+
+        # For now, use has_mean=False which works with current HA versions
         metadata = StatisticMetaData(
             has_mean=False,
             has_sum=True,

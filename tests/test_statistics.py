@@ -373,6 +373,7 @@ class TestHelenStatisticsManager:
                 assert metadata["source"] == "helen_energy"
                 assert metadata["statistic_id"] == "helen_energy:monthly_consumption"
                 assert metadata["unit_of_measurement"] == UnitOfEnergy.KILO_WATT_HOUR
+                assert metadata["unit_class"] == "energy"
 
                 # Version-aware mean type checking
                 if has_mean_type:
@@ -385,6 +386,7 @@ class TestHelenStatisticsManager:
                 assert metadata.source == "helen_energy"
                 assert metadata.statistic_id == "helen_energy:monthly_consumption"
                 assert metadata.unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
+                assert metadata.unit_class == "energy"
 
                 # Version-aware mean type checking
                 if has_mean_type:

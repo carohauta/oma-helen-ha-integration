@@ -320,6 +320,7 @@ class HelenStatisticsManager:
             "source": DOMAIN,
             "statistic_id": self.statistic_id,
             "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+            "unit_class": "energy",  # Required for HA 2026.11+
         }
 
         if HAS_MEAN_TYPE:

@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from helenservice import RESOLUTION_QUARTER, HelenApiClient
+from helenservice import RESOLUTION_HOUR, HelenApiClient
 from helenservice.api_response import (
     MeasurementsWithSpotPriceResponse,
     MeasurementsWithSpotPriceSeries,
@@ -117,19 +117,19 @@ class HelenStatisticsManager:
     async def _fetch_interval_data(
         self,
     ) -> list[MeasurementsWithSpotPriceSeries]:
-        """Fetch 15-minute interval data from API.
+        """Fetch hourly interval data from API.
 
         Uses STATISTICS_BACKFILL_HOURS constant to determine how far back to fetch.
 
         Returns:
-            List of measurement series with 15-minute intervals
+            List of measurement series with hourly intervals
         """
         # Calculate date range
         end_date = date.today()
         start_date = end_date - timedelta(days=STATISTICS_BACKFILL_HOURS // 24 + 1)
 
         _LOGGER.debug(
-            "Fetching 15-minute interval data from %s to %s", start_date, end_date
+            "Fetching hourly interval data from %s to %s", start_date, end_date
         )
 
         # Fetch data using executor to avoid blocking
@@ -138,7 +138,7 @@ class HelenStatisticsManager:
                 self.api_client.get_measurements_with_spot_prices,
                 start_date,
                 end_date,
-                RESOLUTION_QUARTER,  # 15-minute intervals
+                RESOLUTION_HOUR,  # Hourly intervals
             )
         )
 
@@ -184,89 +184,71 @@ class HelenStatisticsManager:
             )
             return 0.0
 
-    def _aggregate_to_hourly(
-        self, series: list[MeasurementsWithSpotPriceSeries]
-    ) -> dict[datetime, float]:
-        """Aggregate 15-minute interval data to hourly totals.
-
-        Args:
-            series: List of 15-minute measurement intervals
-
-        Returns:
-            Dictionary mapping hourly timestamps to total kWh for that hour
-        """
-        hourly_totals: dict[datetime, float] = {}
-
-        for entry in series:
-            # Parse timestamp
-            try:
-                interval_time = self._convert_to_utc(entry.start)
-            except Exception as err:
-                _LOGGER.warning("Failed to parse timestamp %s: %s", entry.start, err)
-                continue
-
-            # Round down to the top of the hour
-            hour_timestamp = interval_time.replace(minute=0, second=0, microsecond=0)
-
-            # Extract electricity value
-            electricity = self._extract_electricity_value(entry)
-            if electricity is None:
-                continue
-
-            # Add to hourly total
-            if hour_timestamp not in hourly_totals:
-                hourly_totals[hour_timestamp] = 0.0
-            hourly_totals[hour_timestamp] += electricity
-
-        return hourly_totals
-
     def _build_statistics_from_intervals(
         self,
         series: list[MeasurementsWithSpotPriceSeries],
         last_cumulative: float,
     ) -> list[StatisticData]:
-        """Build cumulative statistics from interval data.
-
-        Aggregates 15-minute intervals to hourly totals before creating statistics.
+        """Build cumulative statistics from hourly interval data.
 
         Args:
-            series: List of 15-minute measurement intervals from API
+            series: List of hourly measurement intervals from API
             last_cumulative: Last known cumulative total
 
         Returns:
             List of StatisticData objects ready for import
         """
-        # Step 1: Aggregate to hourly totals
-        hourly_totals = self._aggregate_to_hourly(series)
-
-        # Step 2: Build statistics from hourly totals
         statistics = []
         cumulative = last_cumulative
         now_utc = datetime.now(ZoneInfo("UTC"))
         future_count = 0
+        missing_count = 0
 
-        # Sort hourly timestamps to ensure chronological order
-        for hour_timestamp in sorted(hourly_totals.keys()):
-            # Filter out future data
-            if hour_timestamp > now_utc:
+        for entry in series:
+            # Parse timestamp and convert to UTC
+            try:
+                utc_time = self._convert_to_utc(entry.start)
+            except Exception as err:
+                _LOGGER.warning("Failed to parse timestamp %s: %s", entry.start, err)
+                continue
+
+            # Verify timestamp is at top of hour (should already be from API)
+            if utc_time.minute != 0 or utc_time.second != 0:
+                _LOGGER.warning(
+                    "Received non-hourly timestamp from API: %s", utc_time
+                )
+                continue
+
+            # Filter out future data (API can return predictions)
+            if utc_time > now_utc:
                 future_count += 1
                 continue
 
-            # Add hourly total to cumulative
-            cumulative += hourly_totals[hour_timestamp]
+            # Extract electricity value
+            electricity = self._extract_electricity_value(entry)
+
+            # Skip missing data
+            if electricity is None:
+                missing_count += 1
+                continue
+
+            # Add hourly value to cumulative total
+            cumulative += electricity
 
             # Create statistics data point
             statistics.append(
                 StatisticData(
-                    start=hour_timestamp,
+                    start=utc_time,
                     state=safe_round(cumulative),
                     sum=safe_round(cumulative),
                 )
             )
 
-        # Log results
+        # Log filtering results
         if future_count > 0:
-            _LOGGER.debug("Filtered out %d future hourly intervals", future_count)
+            _LOGGER.debug("Filtered out %d future intervals", future_count)
+        if missing_count > 0:
+            _LOGGER.debug("Skipped %d intervals with missing data", missing_count)
 
         _LOGGER.debug(
             "Built %d hourly statistics entries (cumulative: %.2f kWh)",
@@ -316,7 +298,7 @@ class HelenStatisticsManager:
         # HA 2026.11+ requires mean_type, older versions use has_mean
         metadata_kwargs = {
             "has_sum": True,
-            "name": "Helen Energy Monthly Consumption",
+            "name": "Helen Energy Hourly Statistics",
             "source": DOMAIN,
             "statistic_id": self.statistic_id,
             "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,

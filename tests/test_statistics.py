@@ -22,19 +22,19 @@ def mock_api_client():
 
 @pytest.fixture
 def mock_measurement_series():
-    """Create mock 15-minute measurement series spanning 3 hours."""
+    """Create mock hourly measurement series spanning 3 hours."""
     helsinki_tz = ZoneInfo("Europe/Helsinki")
     base_time = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
 
     series = []
-    # Create 12 entries (3 hours × 4 intervals per hour)
-    for i in range(12):
-        start_time = base_time + timedelta(minutes=15 * i)
+    # Create 3 hourly entries
+    for i in range(3):
+        start_time = base_time + timedelta(hours=i)
         series.append(
             Mock(
                 start=start_time.isoformat(),
-                stop=(start_time + timedelta(minutes=15)).isoformat(),
-                electricity=0.5,  # 0.5 kWh per 15-min interval
+                stop=(start_time + timedelta(hours=1)).isoformat(),
+                electricity=2.0,  # 2.0 kWh per hour
             )
         )
 
@@ -46,7 +46,7 @@ def mock_measurement_response(mock_measurement_series):
     """Mock API response for measurements."""
     mock_response = Mock()
     mock_response.series = mock_measurement_series
-    mock_response.resolution = "quarter"
+    mock_response.resolution = "hour"
     mock_response.missing_series = []
     return mock_response
 
@@ -97,34 +97,10 @@ class TestHelenStatisticsManager:
         entry = Mock(electricity=None)
         assert manager._extract_electricity_value(entry) is None
 
-    def test_aggregate_to_hourly(
-        self, hass: HomeAssistant, mock_api_client, mock_measurement_series
-    ):
-        """Test aggregating 15-minute intervals to hourly totals."""
-        manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test"
-        )
-
-        # mock_measurement_series has 12 entries of 0.5 kWh each spanning 3 hours
-        hourly_totals = manager._aggregate_to_hourly(mock_measurement_series)
-
-        # Should have 3 hourly entries
-        assert len(hourly_totals) == 3
-
-        # Verify we got hourly timestamps (minutes = 0)
-        for timestamp in hourly_totals.keys():
-            assert timestamp.minute == 0
-            assert timestamp.second == 0
-            assert timestamp.microsecond == 0
-
-        # Each hour should have 4 intervals × 0.5 kWh = 2.0 kWh
-        for total in hourly_totals.values():
-            assert total == 2.0
-
     def test_build_statistics_cumulative_calculation(
         self, hass: HomeAssistant, mock_api_client, mock_measurement_series
     ):
-        """Test cumulative total calculation from interval data."""
+        """Test cumulative total calculation from hourly interval data."""
         manager = HelenStatisticsManager(
             hass, mock_api_client, "sensor.test"        )
 
@@ -135,10 +111,10 @@ class TestHelenStatisticsManager:
             mock_measurement_series, last_cumulative
         )
 
-        # Should have 3 hourly entries (12 intervals aggregated to 3 hours)
+        # Should have 3 hourly entries
         assert len(statistics) == 3
 
-        # Each hour adds 2.0 kWh (4 × 0.5), so final cumulative should be 100 + 6.0 = 106.0
+        # Each hour adds 2.0 kWh, so final cumulative should be 100 + 6.0 = 106.0
         assert statistics[-1]["sum"] == 106.0
         assert statistics[-1]["state"] == 106.0
 
@@ -171,19 +147,19 @@ class TestHelenStatisticsManager:
         series = [
             Mock(
                 start=base_time.isoformat(),
-                stop=(base_time + timedelta(minutes=15)).isoformat(),
+                stop=(base_time + timedelta(hours=1)).isoformat(),
                 electricity=0.5,
                 electricity_transfer=None,
             ),
             Mock(
-                start=(base_time + timedelta(minutes=15)).isoformat(),
-                stop=(base_time + timedelta(minutes=30)).isoformat(),
+                start=(base_time + timedelta(hours=1)).isoformat(),
+                stop=(base_time + timedelta(hours=2)).isoformat(),
                 electricity=None,  # Missing data
                 electricity_transfer=None,
             ),
             Mock(
-                start=(base_time + timedelta(minutes=30)).isoformat(),
-                stop=(base_time + timedelta(minutes=45)).isoformat(),
+                start=(base_time + timedelta(hours=2)).isoformat(),
+                stop=(base_time + timedelta(hours=3)).isoformat(),
                 electricity=0.5,
                 electricity_transfer=None,
             ),
@@ -191,8 +167,8 @@ class TestHelenStatisticsManager:
 
         statistics = manager._build_statistics_from_intervals(series, 0.0)
 
-        # Should have 1 hourly statistics entry (all 3 intervals aggregate to same hour)
-        assert len(statistics) == 1
+        # Should have 2 hourly statistics entries (skipped the None entry)
+        assert len(statistics) == 2
 
         # Cumulative should skip None and sum valid entries: 0.5 + 0.5 = 1.0
         assert statistics[-1]["sum"] == 1.0
@@ -206,26 +182,27 @@ class TestHelenStatisticsManager:
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
 
-        # Create series with past, present, and future data
-        past_time = datetime.now(helsinki_tz) - timedelta(hours=1)
-        future_time = datetime.now(helsinki_tz) + timedelta(hours=1)
+        # Create series with past and future data (rounded to hourly)
+        now = datetime.now(helsinki_tz)
+        past_time = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)
+        future_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
 
         series = [
             Mock(
                 start=past_time.isoformat(),
-                stop=(past_time + timedelta(minutes=15)).isoformat(),
+                stop=(past_time + timedelta(hours=1)).isoformat(),
                 electricity=0.5,
                 electricity_transfer=None,
             ),
             Mock(
                 start=future_time.isoformat(),  # Future data - should be filtered
-                stop=(future_time + timedelta(minutes=15)).isoformat(),
+                stop=(future_time + timedelta(hours=1)).isoformat(),
                 electricity=0.5,
                 electricity_transfer=None,
             ),
             Mock(
-                start=(future_time + timedelta(minutes=15)).isoformat(),  # Also future
-                stop=(future_time + timedelta(minutes=30)).isoformat(),
+                start=(future_time + timedelta(hours=1)).isoformat(),  # Also future
+                stop=(future_time + timedelta(hours=2)).isoformat(),
                 electricity=0.5,
                 electricity_transfer=None,
             ),
@@ -269,7 +246,7 @@ class TestHelenStatisticsManager:
     async def test_fetch_interval_data(
         self, hass: HomeAssistant, mock_api_client, mock_measurement_response
     ):
-        """Test fetching 15-minute interval data from API."""
+        """Test fetching hourly interval data from API."""
         manager = HelenStatisticsManager(
             hass, mock_api_client, "sensor.test"        )
 
@@ -281,9 +258,9 @@ class TestHelenStatisticsManager:
         with patch.object(hass, "async_add_executor_job", side_effect=async_return):
             series = await manager._fetch_interval_data()
 
-        # Verify we got the series data (12 entries from 3-hour span)
-        assert len(series) == 12
-        assert series[0].electricity == 0.5
+        # Verify we got the series data (3 hourly entries)
+        assert len(series) == 3
+        assert series[0].electricity == 2.0
 
     async def test_get_last_cumulative_total_no_existing_stats(
         self, hass: HomeAssistant, mock_api_client
@@ -369,7 +346,7 @@ class TestHelenStatisticsManager:
 
             if isinstance(metadata, dict):
                 assert metadata["has_sum"] is True
-                assert metadata["name"] == "Helen Energy Monthly Consumption"
+                assert metadata["name"] == "Helen Energy Hourly Statistics"
                 assert metadata["source"] == "helen_energy"
                 assert metadata["statistic_id"] == "helen_energy:monthly_consumption"
                 assert metadata["unit_of_measurement"] == UnitOfEnergy.KILO_WATT_HOUR
@@ -382,7 +359,7 @@ class TestHelenStatisticsManager:
                     assert metadata["has_mean"] is False
             else:
                 assert metadata.has_sum is True
-                assert metadata.name == "Helen Energy Monthly Consumption"
+                assert metadata.name == "Helen Energy Hourly Statistics"
                 assert metadata.source == "helen_energy"
                 assert metadata.statistic_id == "helen_energy:monthly_consumption"
                 assert metadata.unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR

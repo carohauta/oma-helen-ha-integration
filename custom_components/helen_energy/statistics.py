@@ -13,6 +13,14 @@ from helenservice.api_response import (
 )
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
+
+# Import StatisticMeanType if available (HA 2026.11+)
+try:
+    from homeassistant.components.recorder.models import StatisticMeanType
+
+    HAS_MEAN_TYPE = True
+except ImportError:
+    HAS_MEAN_TYPE = False
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
@@ -304,16 +312,24 @@ class HelenStatisticsManager:
         Args:
             statistics: List of StatisticData to import
         """
-        # TODO: Add mean_type=StatisticMeanType.NONE when upgrading to HA 2026.11+
-        # For now, use has_mean=False which works with current HA versions
-        metadata = StatisticMetaData(
-            has_mean=False,
-            has_sum=True,
-            name="Helen Energy Monthly Consumption",
-            source=DOMAIN,
-            statistic_id=self.statistic_id,
-            unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        )
+        # Build metadata with version-aware mean type handling
+        # HA 2026.11+ requires mean_type, older versions use has_mean
+        metadata_kwargs = {
+            "has_sum": True,
+            "name": "Helen Energy Monthly Consumption",
+            "source": DOMAIN,
+            "statistic_id": self.statistic_id,
+            "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+        }
+
+        if HAS_MEAN_TYPE:
+            # HA 2026.11+ - use mean_type
+            metadata_kwargs["mean_type"] = StatisticMeanType.NONE
+        else:
+            # Pre-2026.11 - use has_mean
+            metadata_kwargs["has_mean"] = False
+
+        metadata = StatisticMetaData(**metadata_kwargs)
 
         async_add_external_statistics(self.hass, metadata, statistics)
         _LOGGER.debug("Statistics imported successfully for %s", self.statistic_id)

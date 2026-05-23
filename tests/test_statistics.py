@@ -359,22 +359,38 @@ class TestHelenStatisticsManager:
 
             # Verify metadata (dict or object depending on HA version)
             metadata = call_args[0][1]  # Second argument is metadata
+
+            # Check if StatisticMeanType is available
+            try:
+                from homeassistant.components.recorder.models import StatisticMeanType
+                has_mean_type = True
+            except ImportError:
+                has_mean_type = False
+
             if isinstance(metadata, dict):
-                assert metadata["has_mean"] is False
                 assert metadata["has_sum"] is True
                 assert metadata["name"] == "Helen Energy Monthly Consumption"
                 assert metadata["source"] == "helen_energy"
                 assert metadata["statistic_id"] == "helen_energy:monthly_consumption"
                 assert metadata["unit_of_measurement"] == UnitOfEnergy.KILO_WATT_HOUR
-                # TODO: Add mean_type check when upgrading to HA 2026.11+
+
+                # Version-aware mean type checking
+                if has_mean_type:
+                    assert metadata.get("mean_type") == StatisticMeanType.NONE
+                else:
+                    assert metadata["has_mean"] is False
             else:
-                assert metadata.has_mean is False
                 assert metadata.has_sum is True
                 assert metadata.name == "Helen Energy Monthly Consumption"
                 assert metadata.source == "helen_energy"
                 assert metadata.statistic_id == "helen_energy:monthly_consumption"
                 assert metadata.unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
-                # TODO: Add mean_type check when upgrading to HA 2026.11+
+
+                # Version-aware mean type checking
+                if has_mean_type:
+                    assert metadata.mean_type == StatisticMeanType.NONE
+                else:
+                    assert metadata.has_mean is False
 
             # Verify statistics data
             statistics_arg = call_args[0][2]  # Third argument is statistics list

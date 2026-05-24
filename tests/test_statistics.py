@@ -563,3 +563,279 @@ class TestHelenStatisticsManager:
             # Verify statistics data
             statistics_arg = call_args[0][2]  # Third argument is statistics list
             assert statistics_arg == test_statistics
+
+    async def test_get_existing_statistics_in_window(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Test getting existing statistics in a time window."""
+        manager = HelenStatisticsManager(
+            hass, mock_api_client, "sensor.helen_monthly_consumption"
+        )
+
+        start_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=ZoneInfo("UTC"))
+        end_time = datetime(2024, 5, 15, 3, 0, 0, tzinfo=ZoneInfo("UTC"))
+
+        # Mock statistics_during_period to return some existing data
+        async def async_stats_query(*args, **kwargs):
+            return {
+                "helen_energy:hourly_energy_consumption": [
+                    {"start": start_time.timestamp(), "sum": 10.0},
+                    {
+                        "start": (start_time + timedelta(hours=1)).timestamp(),
+                        "sum": 12.0,
+                    },
+                    # Skip hour 2 (gap)
+                ]
+            }
+
+        mock_instance = Mock()
+        mock_instance.async_add_executor_job = Mock(side_effect=async_stats_query)
+
+        with patch(
+            "custom_components.helen_energy.statistics.get_instance",
+            return_value=mock_instance,
+        ):
+            existing = await manager._get_existing_statistics_in_window(
+                manager.consumption_statistic_id, start_time, end_time
+            )
+
+        # Should have 2 timestamps, missing hour 2
+        assert len(existing) == 2
+        assert start_time in existing
+        assert start_time + timedelta(hours=1) in existing
+        assert start_time + timedelta(hours=2) not in existing  # Gap
+        assert existing[start_time] == 10.0
+        assert existing[start_time + timedelta(hours=1)] == 12.0
+
+    def test_detect_gaps(self, hass: HomeAssistant, mock_api_client):
+        """Test gap detection logic."""
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        base_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=helsinki_tz)
+
+        # Create API series with 4 hours
+        api_series = []
+        for i in range(4):
+            start_time = base_time + timedelta(hours=i)
+            api_series.append(
+                Mock(
+                    start=start_time.isoformat(),
+                    stop=(start_time + timedelta(hours=1)).isoformat(),
+                    electricity=1.0,
+                    electricity_spot_prices_vat=500.0,
+                )
+            )
+
+        # Existing statistics have hours 0 and 2 (missing 1 and 3)
+        base_time_utc = base_time.astimezone(ZoneInfo("UTC")).replace(
+            minute=0, second=0, microsecond=0
+        )
+        existing_timestamps = {
+            base_time_utc: 10.0,
+            base_time_utc + timedelta(hours=2): 12.0,
+        }
+
+        # Detect gaps
+        gaps = manager._detect_gaps(api_series, existing_timestamps)
+
+        # Should detect 2 gaps (hours 1 and 3)
+        assert len(gaps) == 2
+        gap_times = [
+            datetime.fromisoformat(g.start)
+            .astimezone(ZoneInfo("UTC"))
+            .replace(minute=0, second=0, microsecond=0)
+            for g in gaps
+        ]
+        assert base_time_utc + timedelta(hours=1) in gap_times
+        assert base_time_utc + timedelta(hours=3) in gap_times
+
+    async def test_get_cumulative_at_or_before_timestamp(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Test getting cumulative value before a timestamp."""
+        manager = HelenStatisticsManager(
+            hass, mock_api_client, "sensor.helen_monthly_consumption"
+        )
+
+        query_time = datetime(2024, 5, 15, 5, 0, 0, tzinfo=ZoneInfo("UTC"))
+
+        # Mock statistics_during_period
+        async def async_stats_query(*args, **kwargs):
+            # Return records up to query_time
+            return {
+                "helen_energy:hourly_energy_consumption": [
+                    {
+                        "start": datetime(
+                            2024, 5, 15, 0, 0, 0, tzinfo=ZoneInfo("UTC")
+                        ).timestamp(),
+                        "sum": 10.0,
+                    },
+                    {
+                        "start": datetime(
+                            2024, 5, 15, 3, 0, 0, tzinfo=ZoneInfo("UTC")
+                        ).timestamp(),
+                        "sum": 15.0,
+                    },
+                ]
+            }
+
+        mock_instance = Mock()
+        mock_instance.async_add_executor_job = Mock(side_effect=async_stats_query)
+
+        with patch(
+            "custom_components.helen_energy.statistics.get_instance",
+            return_value=mock_instance,
+        ):
+            cumulative, timestamp = await manager._get_cumulative_at_or_before_timestamp(
+                manager.consumption_statistic_id, query_time
+            )
+
+        # Should get the last record before query_time (hour 3)
+        assert cumulative == 15.0
+        assert timestamp == datetime(2024, 5, 15, 3, 0, 0, tzinfo=ZoneInfo("UTC"))
+
+    async def test_build_statistics_for_gaps(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Test building statistics for gaps with correct cumulative values."""
+        manager = HelenStatisticsManager(
+            hass, mock_api_client, "sensor.helen_monthly_consumption"
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        base_time = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
+
+        # Create gap series (2 consecutive missing hours)
+        gap_series = [
+            Mock(
+                start=base_time.isoformat(),
+                stop=(base_time + timedelta(hours=1)).isoformat(),
+                electricity=1.5,
+                electricity_spot_prices_vat=500.0,  # 5.00 EUR/kWh
+            ),
+            Mock(
+                start=(base_time + timedelta(hours=1)).isoformat(),
+                stop=(base_time + timedelta(hours=2)).isoformat(),
+                electricity=2.0,
+                electricity_spot_prices_vat=600.0,  # 6.00 EUR/kWh
+            ),
+        ]
+
+        # Mock _get_cumulative_at_or_before_timestamp
+        # For consecutive gaps, only the first gap queries the DB
+        # Subsequent consecutive gaps use the cumulative from the previous gap
+        async def mock_get_cumulative(statistic_id, timestamp):
+            if "consumption" in statistic_id:
+                # Only called once for the first gap
+                return 100.0, timestamp
+            else:  # cost
+                # Only called once for the first gap
+                return 50.0, timestamp
+
+        with patch.object(
+            manager,
+            "_get_cumulative_at_or_before_timestamp",
+            side_effect=mock_get_cumulative,
+        ) as mock_cumulative:
+            consumption_stats, cost_stats = await manager._build_statistics_for_gaps(
+                gap_series,
+                manager.consumption_statistic_id,
+                manager.cost_statistic_id,
+            )
+
+            # Verify only called once per statistic type (for the first gap)
+            # Second gap is consecutive, so it chains from the first
+            assert mock_cumulative.call_count == 2  # consumption + cost for first gap
+
+        # Should have 2 statistics entries
+        assert len(consumption_stats) == 2
+        assert len(cost_stats) == 2
+
+        # First gap: 100.0 + 1.5 = 101.5 kWh
+        assert consumption_stats[0]["sum"] == 101.5
+        # Cost: 50.0 + (1.5 * 5.00) = 57.5 EUR
+        assert cost_stats[0]["sum"] == 57.5
+
+        # Second gap (consecutive, chained from first): 101.5 + 2.0 = 103.5 kWh
+        assert consumption_stats[1]["sum"] == 103.5
+        # Cost: 57.5 + (2.0 * 6.00) = 69.5 EUR
+        assert cost_stats[1]["sum"] == 69.5
+
+    async def test_build_statistics_for_gaps_non_consecutive(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Test building statistics for non-consecutive gaps."""
+        manager = HelenStatisticsManager(
+            hass, mock_api_client, "sensor.helen_monthly_consumption"
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        base_time = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
+
+        # Create gap series with a 2-hour break between gaps
+        gap_series = [
+            Mock(
+                start=base_time.isoformat(),
+                stop=(base_time + timedelta(hours=1)).isoformat(),
+                electricity=1.5,
+                electricity_spot_prices_vat=500.0,  # 5.00 EUR/kWh
+            ),
+            Mock(
+                start=(base_time + timedelta(hours=3)).isoformat(),  # 3 hours later
+                stop=(base_time + timedelta(hours=4)).isoformat(),
+                electricity=2.0,
+                electricity_spot_prices_vat=600.0,  # 6.00 EUR/kWh
+            ),
+        ]
+
+        # Mock _get_cumulative_at_or_before_timestamp
+        # For non-consecutive gaps, each gap queries the DB
+        call_counts = {"consumption": 0, "cost": 0}
+
+        async def mock_get_cumulative(statistic_id, timestamp):
+            if "consumption" in statistic_id:
+                call_counts["consumption"] += 1
+                if call_counts["consumption"] == 1:
+                    # First gap: cumulative before = 100.0
+                    return 100.0, timestamp
+                else:
+                    # Second gap (non-consecutive): cumulative before = 110.0
+                    # (assuming 110.0 kWh accumulated in the 2 hours between gaps)
+                    return 110.0, timestamp
+            else:  # cost
+                call_counts["cost"] += 1
+                if call_counts["cost"] == 1:
+                    # First gap: cumulative before = 50.0
+                    return 50.0, timestamp
+                else:
+                    # Second gap: cumulative before = 60.0
+                    return 60.0, timestamp
+
+        with patch.object(
+            manager,
+            "_get_cumulative_at_or_before_timestamp",
+            side_effect=mock_get_cumulative,
+        ) as mock_cumulative:
+            consumption_stats, cost_stats = await manager._build_statistics_for_gaps(
+                gap_series,
+                manager.consumption_statistic_id,
+                manager.cost_statistic_id,
+            )
+
+            # Verify called twice per statistic type (once for each gap)
+            assert mock_cumulative.call_count == 4  # 2 gaps * 2 statistic types
+
+        # Should have 2 statistics entries
+        assert len(consumption_stats) == 2
+        assert len(cost_stats) == 2
+
+        # First gap: 100.0 + 1.5 = 101.5 kWh
+        assert consumption_stats[0]["sum"] == 101.5
+        # Cost: 50.0 + (1.5 * 5.00) = 57.5 EUR
+        assert cost_stats[0]["sum"] == 57.5
+
+        # Second gap (non-consecutive): 110.0 + 2.0 = 112.0 kWh
+        assert consumption_stats[1]["sum"] == 112.0
+        # Cost: 60.0 + (2.0 * 6.00) = 72.0 EUR
+        assert cost_stats[1]["sum"] == 72.0

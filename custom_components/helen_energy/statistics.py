@@ -88,16 +88,20 @@ class HelenStatisticsManager:
                 _LOGGER.warning("No interval data received from API")
                 return
 
-            # Calculate backfill time window (72 hours)
+            # Find the time range of API data (use earliest API timestamp as start)
             now_utc = datetime.now(ZoneInfo("UTC"))
-            backfill_start = now_utc - timedelta(hours=STATISTICS_BACKFILL_HOURS)
+            api_timestamps = [
+                datetime.fromisoformat(entry.start).astimezone(ZoneInfo("UTC"))
+                for entry in series
+            ]
+            earliest_api_timestamp = min(api_timestamps)
 
-            # Get existing statistics in the backfill window
+            # Get existing statistics covering the full API data range
             existing_consumption = await self._get_existing_statistics_in_window(
-                self.consumption_statistic_id, backfill_start, now_utc
+                self.consumption_statistic_id, earliest_api_timestamp, now_utc
             )
             existing_cost = await self._get_existing_statistics_in_window(
-                self.cost_statistic_id, backfill_start, now_utc
+                self.cost_statistic_id, earliest_api_timestamp, now_utc
             )
 
             _LOGGER.debug(
@@ -388,7 +392,11 @@ class HelenStatisticsManager:
                     # Handle both Unix timestamp (float) and datetime objects
                     timestamp_raw = stat["start"]
                     if isinstance(timestamp_raw, datetime):
-                        timestamp = timestamp_raw
+                        # Ensure timezone-aware UTC
+                        if timestamp_raw.tzinfo is None:
+                            timestamp = timestamp_raw.replace(tzinfo=ZoneInfo("UTC"))
+                        else:
+                            timestamp = timestamp_raw.astimezone(ZoneInfo("UTC"))
                     else:
                         timestamp = datetime.fromtimestamp(
                             timestamp_raw, tz=ZoneInfo("UTC")
@@ -423,14 +431,17 @@ class HelenStatisticsManager:
     ) -> list[MeasurementsWithSpotPriceSeries]:
         """Find API data for timestamps missing in existing statistics.
 
+        Only includes entries that have actual electricity data (not future/pending data).
+
         Args:
             api_series: Hourly data from API
             existing_timestamps: Dict of existing timestamps and cumulative values
 
         Returns:
-            List of API series entries for missing timestamps only
+            List of API series entries for missing timestamps that have data
         """
         missing_series = []
+        pending_count = 0
 
         for entry in api_series:
             # Parse and normalize timestamp
@@ -440,13 +451,24 @@ class HelenStatisticsManager:
 
             # Check if timestamp is missing
             if entry_time_utc not in existing_timestamps:
-                missing_series.append(entry)
+                # Only count as a gap if we have actual electricity data
+                electricity = self._extract_electricity_value(entry)
+                if electricity is not None:
+                    missing_series.append(entry)
+                else:
+                    pending_count += 1
 
         if missing_series:
             _LOGGER.debug(
-                "Detected %d missing timestamps (gaps) out of %d API records",
+                "Detected %d fillable gaps out of %d API records (%d pending without data)",
                 len(missing_series),
                 len(api_series),
+                pending_count,
+            )
+        elif pending_count > 0:
+            _LOGGER.debug(
+                "No fillable gaps, %d recent hours pending electricity data",
+                pending_count,
             )
 
         return missing_series

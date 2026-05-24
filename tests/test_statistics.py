@@ -95,7 +95,7 @@ class TestHelenStatisticsManager:
         assert (
             manager.consumption_statistic_id == "helen_energy:hourly_energy_consumption"
         )
-        assert manager.cost_statistic_id == "helen_energy:hourly_cost"
+        assert manager.cost_statistic_id == "helen_energy:hourly_cost_spot"
 
     def test_convert_to_utc(self, hass: HomeAssistant, mock_api_client):
         """Test timezone conversion from Helsinki to UTC."""
@@ -550,13 +550,13 @@ class TestHelenStatisticsManager:
             metadata = call_args[0][1]  # Second argument is metadata
 
             if isinstance(metadata, dict):
-                assert metadata["name"] == "Helen Energy Hourly Total Cost Statistics"
-                assert metadata["statistic_id"] == "helen_energy:hourly_cost"
+                assert metadata["name"] == "Helen Energy Hourly Spot Prices"
+                assert metadata["statistic_id"] == "helen_energy:hourly_cost_spot"
                 assert metadata["unit_of_measurement"] == "EUR"
                 assert metadata["unit_class"] is None
             else:
-                assert metadata.name == "Helen Energy Hourly Total Cost Statistics"
-                assert metadata.statistic_id == "helen_energy:hourly_cost"
+                assert metadata.name == "Helen Energy Hourly Spot Prices"
+                assert metadata.statistic_id == "helen_energy:hourly_cost_spot"
                 assert metadata.unit_of_measurement == "EUR"
                 assert metadata.unit_class is None
 
@@ -738,10 +738,11 @@ class TestHelenStatisticsManager:
             "_get_cumulative_at_or_before_timestamp",
             side_effect=mock_get_cumulative,
         ) as mock_cumulative:
-            consumption_stats, cost_stats = await manager._build_statistics_for_gaps(
+            consumption_stats, cost_stats, fixed_cost_stats = await manager._build_statistics_for_gaps(
                 gap_series,
                 manager.consumption_statistic_id,
                 manager.cost_statistic_id,
+                manager.fixed_cost_statistic_id,
             )
 
             # Verify only called once per statistic type (for the first gap)
@@ -751,6 +752,8 @@ class TestHelenStatisticsManager:
         # Should have 2 statistics entries
         assert len(consumption_stats) == 2
         assert len(cost_stats) == 2
+        # No fixed cost stats (no fixed_unit_price configured)
+        assert len(fixed_cost_stats) == 0
 
         # First gap: 100.0 + 1.5 = 101.5 kWh
         assert consumption_stats[0]["sum"] == 101.5
@@ -817,10 +820,11 @@ class TestHelenStatisticsManager:
             "_get_cumulative_at_or_before_timestamp",
             side_effect=mock_get_cumulative,
         ) as mock_cumulative:
-            consumption_stats, cost_stats = await manager._build_statistics_for_gaps(
+            consumption_stats, cost_stats, fixed_cost_stats = await manager._build_statistics_for_gaps(
                 gap_series,
                 manager.consumption_statistic_id,
                 manager.cost_statistic_id,
+                manager.fixed_cost_statistic_id,
             )
 
             # Verify called twice per statistic type (once for each gap)
@@ -829,6 +833,8 @@ class TestHelenStatisticsManager:
         # Should have 2 statistics entries
         assert len(consumption_stats) == 2
         assert len(cost_stats) == 2
+        # No fixed cost stats (no fixed_unit_price configured)
+        assert len(fixed_cost_stats) == 0
 
         # First gap: 100.0 + 1.5 = 101.5 kWh
         assert consumption_stats[0]["sum"] == 101.5
@@ -839,3 +845,119 @@ class TestHelenStatisticsManager:
         assert consumption_stats[1]["sum"] == 112.0
         # Cost: 60.0 + (2.0 * 6.00) = 72.0 EUR
         assert cost_stats[1]["sum"] == 72.0
+
+    async def test_build_statistics_for_gaps_with_fixed_price(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Test building statistics with fixed unit price calculates fixed cost."""
+        # Create manager with fixed unit price (10 cents/kWh = 0.10 EUR/kWh)
+        manager = HelenStatisticsManager(
+            hass, mock_api_client, "sensor.helen_monthly_consumption",
+            fixed_unit_price=10.0,  # 10 cents/kWh
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        base_time = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
+
+        # Create gap series
+        gap_series = [
+            Mock(
+                start=base_time.isoformat(),
+                stop=(base_time + timedelta(hours=1)).isoformat(),
+                electricity=1.5,  # 1.5 kWh
+                electricity_spot_prices_vat=500.0,  # 5.00 EUR/kWh (spot price)
+            ),
+            Mock(
+                start=(base_time + timedelta(hours=1)).isoformat(),
+                stop=(base_time + timedelta(hours=2)).isoformat(),
+                electricity=2.0,  # 2.0 kWh
+                electricity_spot_prices_vat=600.0,  # 6.00 EUR/kWh (spot price)
+            ),
+        ]
+
+        # Mock cumulative values
+        async def mock_get_cumulative(statistic_id, timestamp):
+            if "consumption" in statistic_id:
+                return 100.0, timestamp
+            elif "fixed" in statistic_id:
+                return 10.0, timestamp  # Fixed cost cumulative
+            else:  # spot cost
+                return 50.0, timestamp
+
+        with patch.object(
+            manager,
+            "_get_cumulative_at_or_before_timestamp",
+            side_effect=mock_get_cumulative,
+        ):
+            consumption_stats, cost_stats, fixed_cost_stats = await manager._build_statistics_for_gaps(
+                gap_series,
+                manager.consumption_statistic_id,
+                manager.cost_statistic_id,
+                manager.fixed_cost_statistic_id,
+            )
+
+        # Should have 2 statistics entries for each type
+        assert len(consumption_stats) == 2
+        assert len(cost_stats) == 2
+        assert len(fixed_cost_stats) == 2
+
+        # First gap: consumption = 100.0 + 1.5 = 101.5 kWh
+        assert consumption_stats[0]["sum"] == 101.5
+        # Spot cost: 50.0 + (1.5 * 5.00) = 57.5 EUR
+        assert cost_stats[0]["sum"] == 57.5
+        # Fixed cost: 10.0 + (1.5 * 0.10) = 10.15 EUR
+        assert fixed_cost_stats[0]["sum"] == 10.15
+
+        # Second gap: consumption = 101.5 + 2.0 = 103.5 kWh
+        assert consumption_stats[1]["sum"] == 103.5
+        # Spot cost: 57.5 + (2.0 * 6.00) = 69.5 EUR
+        assert cost_stats[1]["sum"] == 69.5
+        # Fixed cost: 10.15 + (2.0 * 0.10) = 10.35 EUR
+        assert fixed_cost_stats[1]["sum"] == 10.35
+
+    async def test_import_fixed_cost_statistics_metadata(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Test that fixed cost statistics import uses correct metadata."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            fixed_unit_price=10.0,
+        )
+
+        test_statistics = [
+            {
+                "start": datetime(2024, 5, 15, 10, 0, 0, tzinfo=ZoneInfo("UTC")),
+                "state": 50.0,
+                "sum": 50.0,
+            }
+        ]
+
+        # Mock async_add_external_statistics
+        with patch(
+            "custom_components.helen_energy.statistics.async_add_external_statistics"
+        ) as mock_import:
+            await manager._import_fixed_cost_statistics(test_statistics)
+
+            # Verify async_add_external_statistics was called
+            assert mock_import.called
+            call_args = mock_import.call_args
+
+            # Verify metadata (dict or object depending on HA version)
+            metadata = call_args[0][1]  # Second argument is metadata
+
+            if isinstance(metadata, dict):
+                assert metadata["name"] == "Helen Energy Hourly Fixed Prices"
+                assert metadata["statistic_id"] == "helen_energy:hourly_cost_fixed"
+                assert metadata["unit_of_measurement"] == "EUR"
+                assert metadata["unit_class"] is None
+            else:
+                assert metadata.name == "Helen Energy Hourly Fixed Prices"
+                assert metadata.statistic_id == "helen_energy:hourly_cost_fixed"
+                assert metadata.unit_of_measurement == "EUR"
+                assert metadata.unit_class is None
+
+            # Verify statistics data
+            statistics_arg = call_args[0][2]  # Third argument is statistics list
+            assert statistics_arg == test_statistics

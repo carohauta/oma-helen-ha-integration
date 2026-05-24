@@ -139,14 +139,19 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 )
                 entity_id = f"sensor.helen_monthly_consumption_{entry_index + 1}"
 
+            # Get user-configured fixed unit price (if any)
+            config_fixed_unit_price = config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)
+
             self.statistics_manager = HelenStatisticsManager(
                 hass,
                 helen_api_client,
                 entity_id,
+                fixed_unit_price=config_fixed_unit_price,
             )
             _LOGGER.debug(
-                "Statistics manager initialized for %s",
+                "Statistics manager initialized for %s (fixed_price=%s)",
                 entity_id,
+                f"{config_fixed_unit_price} cents/kWh" if config_fixed_unit_price else "from API",
             )
 
     async def _async_update_data(self):
@@ -297,6 +302,13 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         else:
             # Import statistics after successful data fetch
             if self.statistics_manager:
+                # Update fixed unit price from API if not configured by user
+                # Priority: 1. User config, 2. API contract price
+                config_price = self.config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)
+                if config_price is None:
+                    # Use API price if available (only for fixed-price contracts)
+                    self.statistics_manager._fixed_unit_price = data.get("unit_price")
+
                 try:
                     await self.statistics_manager.import_recent_statistics()
                     _LOGGER.debug("Successfully imported energy statistics")

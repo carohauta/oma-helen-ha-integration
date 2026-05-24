@@ -52,6 +52,7 @@ class HelenStatisticsManager:
         hass: HomeAssistant,
         api_client: HelenApiClient,
         entity_id: str,
+        fixed_unit_price: float | None = None,
     ) -> None:
         """Initialize the statistics manager.
 
@@ -59,21 +60,26 @@ class HelenStatisticsManager:
             hass: Home Assistant instance
             api_client: Helen API client instance
             entity_id: Entity ID of the consumption sensor
+            fixed_unit_price: Fixed unit price in cents/kWh (for fixed-price contracts)
         """
         self.hass = hass
         self.api_client = api_client
         self.entity_id = entity_id
+        self._fixed_unit_price = fixed_unit_price
 
         # Create statistic_ids for consumption and cost (for Energy Dashboard)
         self.consumption_statistic_id = f"{DOMAIN}:hourly_energy_consumption"
-        self.cost_statistic_id = f"{DOMAIN}:hourly_cost"
+        self.cost_statistic_id = f"{DOMAIN}:hourly_cost_spot"
+        self.fixed_cost_statistic_id = f"{DOMAIN}:hourly_cost_fixed"
 
         _LOGGER.debug(
-            "Initialized HelenStatisticsManager for %s with statistic_ids: %s (consumption), %s (cost) (%d hour backfill)",
+            "Initialized HelenStatisticsManager for %s with statistic_ids: %s (consumption), %s (spot cost), %s (fixed cost) (%d hour backfill, fixed_price=%s)",
             entity_id,
             self.consumption_statistic_id,
             self.cost_statistic_id,
+            self.fixed_cost_statistic_id,
             STATISTICS_BACKFILL_HOURS,
+            f"{fixed_unit_price} cents/kWh" if fixed_unit_price else "None",
         )
 
     async def import_recent_statistics(self) -> None:
@@ -123,10 +129,11 @@ class HelenStatisticsManager:
             )
 
             # Build statistics for gaps only
-            consumption_stats, cost_stats = await self._build_statistics_for_gaps(
+            consumption_stats, cost_stats, fixed_cost_stats = await self._build_statistics_for_gaps(
                 gap_series,
                 self.consumption_statistic_id,
                 self.cost_statistic_id,
+                self.fixed_cost_statistic_id,
             )
 
             # Import gap-filling statistics
@@ -134,10 +141,15 @@ class HelenStatisticsManager:
                 await self._import_consumption_statistics(consumption_stats)
                 await self._import_cost_statistics(cost_stats)
 
+                # Import fixed cost statistics if we have fixed price data
+                if fixed_cost_stats:
+                    await self._import_fixed_cost_statistics(fixed_cost_stats)
+
                 _LOGGER.info(
-                    "Successfully filled %d gaps in statistics for %s",
+                    "Successfully filled %d gaps in statistics for %s (fixed_cost=%s)",
                     len(consumption_stats),
                     self.entity_id,
+                    "yes" if fixed_cost_stats else "no",
                 )
             else:
                 _LOGGER.debug("No valid gap data to import (missing electricity or prices)")
@@ -532,7 +544,8 @@ class HelenStatisticsManager:
         gap_series: list[MeasurementsWithSpotPriceSeries],
         consumption_statistic_id: str,
         cost_statistic_id: str,
-    ) -> tuple[list[StatisticData], list[StatisticData]]:
+        fixed_cost_statistic_id: str | None = None,
+    ) -> tuple[list[StatisticData], list[StatisticData], list[StatisticData]]:
         """Build statistics for gap filling with correct cumulative values.
 
         For each gap entry, query the cumulative value from the record
@@ -542,12 +555,14 @@ class HelenStatisticsManager:
             gap_series: List of missing hourly measurements from API
             consumption_statistic_id: ID for consumption statistics
             cost_statistic_id: ID for cost statistics
+            fixed_cost_statistic_id: ID for fixed cost statistics (optional)
 
         Returns:
-            Tuple of (consumption_statistics, cost_statistics)
+            Tuple of (consumption_statistics, cost_statistics, fixed_cost_statistics)
         """
         consumption_stats = []
         cost_stats = []
+        fixed_cost_stats = []
 
         # Sort by timestamp to process in chronological order
         sorted_series = sorted(gap_series, key=lambda x: x.start)
@@ -556,7 +571,11 @@ class HelenStatisticsManager:
         # Initialize to None to detect when we need to query the database
         last_cumulative_consumption = None
         last_cumulative_cost = None
+        last_cumulative_fixed_cost = None
         last_timestamp = None
+
+        # Check if we should calculate fixed cost statistics
+        has_fixed_price = self._fixed_unit_price is not None
 
         for entry in sorted_series:
             # Parse and normalize timestamp
@@ -578,6 +597,7 @@ class HelenStatisticsManager:
                 # Use the cumulative from the previous gap we just filled
                 cumulative_consumption = last_cumulative_consumption
                 cumulative_cost = last_cumulative_cost
+                cumulative_fixed_cost = last_cumulative_fixed_cost
             else:
                 # Non-consecutive gap or first gap - query the database
                 cumulative_consumption, _ = await self._get_cumulative_at_or_before_timestamp(
@@ -586,6 +606,12 @@ class HelenStatisticsManager:
                 cumulative_cost, _ = await self._get_cumulative_at_or_before_timestamp(
                     cost_statistic_id, utc_time
                 )
+                if has_fixed_price and fixed_cost_statistic_id:
+                    cumulative_fixed_cost, _ = await self._get_cumulative_at_or_before_timestamp(
+                        fixed_cost_statistic_id, utc_time
+                    )
+                else:
+                    cumulative_fixed_cost = 0.0
 
             # Extract values
             electricity = self._extract_electricity_value(entry)
@@ -603,14 +629,20 @@ class HelenStatisticsManager:
                 )
                 continue
 
-            # Calculate hourly cost
+            # Calculate hourly costs
             hourly_cost = electricity * spot_price
+            hourly_fixed_cost = (
+                electricity * (self._fixed_unit_price / 100.0)
+                if has_fixed_price
+                else 0.0
+            )
 
             # Add to cumulative
             cumulative_consumption += electricity
             cumulative_cost += hourly_cost
+            cumulative_fixed_cost += hourly_fixed_cost
 
-            # Create statistics
+            # Create consumption statistics
             consumption_stats.append(
                 StatisticData(
                     start=utc_time,
@@ -618,6 +650,8 @@ class HelenStatisticsManager:
                     sum=safe_round(cumulative_consumption),
                 )
             )
+
+            # Create spot cost statistics
             cost_stats.append(
                 StatisticData(
                     start=utc_time,
@@ -626,20 +660,31 @@ class HelenStatisticsManager:
                 )
             )
 
+            # Create fixed cost statistics (only if we have a fixed price)
+            if has_fixed_price:
+                fixed_cost_stats.append(
+                    StatisticData(
+                        start=utc_time,
+                        state=safe_round(cumulative_fixed_cost),
+                        sum=safe_round(cumulative_fixed_cost),
+                    )
+                )
+
             _LOGGER.debug(
-                "Gap fill at %s: electricity=%.3f kWh, cumulative consumption=%.2f kWh, cumulative cost=%.2f EUR",
+                "Gap fill at %s: electricity=%.3f kWh, spot_cost=%.2f EUR, fixed_cost=%.2f EUR",
                 utc_time.isoformat(),
                 electricity,
-                cumulative_consumption,
                 cumulative_cost,
+                cumulative_fixed_cost if has_fixed_price else 0.0,
             )
 
             # Update tracking variables for next iteration
             last_cumulative_consumption = cumulative_consumption
             last_cumulative_cost = cumulative_cost
+            last_cumulative_fixed_cost = cumulative_fixed_cost
             last_timestamp = utc_time
 
-        return consumption_stats, cost_stats
+        return consumption_stats, cost_stats, fixed_cost_stats
 
     def _build_statistics_from_intervals(
         self,
@@ -837,7 +882,7 @@ class HelenStatisticsManager:
         """
         metadata_kwargs = {
             "has_sum": True,
-            "name": "Helen Energy Hourly Total Cost Statistics",
+            "name": "Helen Energy Hourly Spot Prices",
             "source": DOMAIN,
             "statistic_id": self.cost_statistic_id,
             "unit_of_measurement": "EUR",
@@ -853,4 +898,35 @@ class HelenStatisticsManager:
         async_add_external_statistics(self.hass, metadata, statistics)
         _LOGGER.debug(
             "Cost statistics imported successfully for %s", self.cost_statistic_id
+        )
+
+    async def _import_fixed_cost_statistics(
+        self, statistics: list[StatisticData]
+    ) -> None:
+        """Import fixed cost statistics into Home Assistant database.
+
+        Fixed cost uses a constant unit price instead of spot prices.
+
+        Args:
+            statistics: List of StatisticData to import
+        """
+        metadata_kwargs = {
+            "has_sum": True,
+            "name": "Helen Energy Hourly Fixed Prices",
+            "source": DOMAIN,
+            "statistic_id": self.fixed_cost_statistic_id,
+            "unit_of_measurement": "EUR",
+            "unit_class": None,
+        }
+
+        if HAS_MEAN_TYPE:
+            metadata_kwargs["mean_type"] = StatisticMeanType.NONE
+        else:
+            metadata_kwargs["has_mean"] = False
+
+        metadata = StatisticMetaData(**metadata_kwargs)
+        async_add_external_statistics(self.hass, metadata, statistics)
+        _LOGGER.debug(
+            "Fixed cost statistics imported successfully for %s",
+            self.fixed_cost_statistic_id,
         )

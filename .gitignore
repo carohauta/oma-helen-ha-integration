@@ -260,3 +260,4 @@ ha_dev/
 
 # Generated documentation files
 README.html
+.claude/settings.local.json

@@ -1,53 +1,55 @@
 {
-    "config": {
-        "step": {
-            "user": {
-                "title": "Connect to Oma Helen",
-                "description": "Enter your Oma Helen credentials to monitor your electricity consumption and costs",
-                "data": {
-                    "username": "Username",
-                    "password": "Password",
-                    "vat": "VAT percentage (default: 25.5%)",
-                    "contract_type": "Contract type",
-                    "default_unit_price": "Override unit price (c/kWh, optional)",
-                    "default_base_price": "Override base price (EUR/month, optional)",
-                    "delivery_site_id": "Delivery site ID (optional)",
-                    "include_transfer_costs": "Transfer costs"
-                },
-                "data_description": {
-                    "contract_type": "Choose your contract type. Select 'Automatic' to detect it automatically, or choose manually if automatic detection fails.",
-                    "default_unit_price": "Set the unit price if you want to override Helen's price",
-                    "default_base_price": "Set the base price if you want to override Helen's base price",
-                    "delivery_site_id": "If you have multiple delivery sites, enter the ID of the site you want to monitor",
-                    "include_transfer_costs": "Select if you want to monitor electricity transfer costs as well"
-                }
-            },
-            "reauth_confirm": {
-                "title": "New Oma Helen authentication",
-                "description": "Enter your password again to authenticate to Oma Helen"
-            }
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Oma Helen",
+        "description": "Enter your Oma Helen credentials to monitor your electricity consumption and costs",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "vat": "VAT percentage (default: 25.5%)",
+          "contract_type": "Contract type",
+          "custom_name": "Custom name for this entry",
+          "default_unit_price": "Override unit price (c/kWh, optional)",
+          "default_base_price": "Override base price (EUR/month, optional)",
+          "delivery_site_id": "Delivery site ID (optional)",
+          "include_transfer_costs": "Transfer costs"
         },
-        "error": {
-            "cannot_connect": "Connection to Oma Helen failed. Check your internet connection and try again. If the problem persists, the service may be temporarily unavailable.",
-            "invalid_auth": "Invalid username or password. Check your credentials and try again.",
-            "invalid_delivery_site_id": "Invalid delivery site ID. Check that the ID exists.",
-            "contract_type_not_detected": "Contract type could not be detected. Please select your contract type manually.",
-            "contract_type_not_resolved": "The contract type {contract_type} could not be reliably resolved. Please select your contract type manually.",
-            "unknown": "An unexpected error occurred. Please check the logs for more details."
-        },
-        "abort": {
-            "already_configured": "Account is already configured",
-            "reauth_successful": "Reauthentication was successful"
+        "data_description": {
+          "custom_name": "E.g. the address of the delivery site or any other descriptive name that helps you distinguish this contract from others",
+          "contract_type": "Choose your contract type. Select 'Automatic' to detect it automatically, or choose manually if automatic detection fails.",
+          "default_unit_price": "Set the unit price if you want to override Helen's price",
+          "default_base_price": "Set the base price if you want to override Helen's base price",
+          "delivery_site_id": "If you have multiple delivery sites, enter the ID of the site you want to monitor",
+          "include_transfer_costs": "Select if you want to monitor electricity transfer costs as well"
         }
+      },
+      "reauth_confirm": {
+        "title": "New Oma Helen authentication",
+        "description": "Enter your password again to authenticate to Oma Helen"
+      }
     },
-    "selector": {
-        "contract_type": {
-            "options": {
-                "automatic": "Automatic (detect from API)",
-                "fixed": "Fixed price",
-                "market": "Market price",
-                "exchange": "Exchange price"
-            }
-        }
+    "error": {
+      "cannot_connect": "Connection to Oma Helen failed. Check your internet connection and try again. If the problem persists, the service may be temporarily unavailable.",
+      "invalid_auth": "Invalid username or password. Check your credentials and try again.",
+      "invalid_delivery_site_id": "Invalid delivery site ID. Check that the ID exists.",
+      "contract_type_not_detected": "Contract type could not be detected. Please select your contract type manually.",
+      "contract_type_not_resolved": "The contract type {contract_type} could not be reliably resolved. Please select your contract type manually.",
+      "unknown": "An unexpected error occurred. Please check the logs for more details."
+    },
+    "abort": {
+      "already_configured": "Account is already configured",
+      "reauth_successful": "Reauthentication was successful"
     }
+  },
+  "selector": {
+    "contract_type": {
+      "options": {
+        "automatic": "Automatic (detect from API)",
+        "fixed": "Fixed price",
+        "market": "Market price",
+        "exchange": "Exchange price"
+      }
+    }
+  }
 }

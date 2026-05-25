@@ -52,6 +52,8 @@ class HelenStatisticsManager:
         hass: HomeAssistant,
         api_client: HelenApiClient,
         entity_id: str,
+        config_entry_id: str,
+        config_entry_title: str,
         fixed_unit_price: float | None = None,
     ) -> None:
         """Initialize the statistics manager.
@@ -60,17 +62,23 @@ class HelenStatisticsManager:
             hass: Home Assistant instance
             api_client: Helen API client instance
             entity_id: Entity ID of the consumption sensor
+            config_entry_id: Config entry ID (used to create unique statistics IDs)
+            config_entry_title: User-friendly config entry title for display names
             fixed_unit_price: Fixed unit price in cents/kWh (for fixed-price contracts)
         """
         self.hass = hass
         self.api_client = api_client
         self.entity_id = entity_id
+        self.config_entry_title = config_entry_title
         self._fixed_unit_price = fixed_unit_price
 
-        # Create statistic_ids for consumption and cost (for Energy Dashboard)
-        self.consumption_statistic_id = f"{DOMAIN}:hourly_energy_consumption"
-        self.cost_statistic_id = f"{DOMAIN}:hourly_cost_spot"
-        self.fixed_cost_statistic_id = f"{DOMAIN}:hourly_cost_fixed"
+        # Create unique statistic_ids for each config entry to prevent collisions
+        # Remove hyphens and lowercase (statistic_ids only allow lowercase, digits, underscores)
+        # Take first 8 chars for a short, unique suffix
+        suffix = config_entry_id.replace("-", "").lower()[:8]
+        self.consumption_statistic_id = f"{DOMAIN}:hourly_energy_consumption_{suffix}"
+        self.cost_statistic_id = f"{DOMAIN}:hourly_cost_spot_{suffix}"
+        self.fixed_cost_statistic_id = f"{DOMAIN}:hourly_cost_fixed_{suffix}"
 
         _LOGGER.debug(
             "Initialized HelenStatisticsManager for %s with statistic_ids: %s (consumption), %s (spot cost), %s (fixed cost) (%d hour backfill, fixed_price=%s)",
@@ -966,7 +974,7 @@ class HelenStatisticsManager:
         """
         metadata_kwargs = {
             "has_sum": True,
-            "name": "Helen Energy Hourly Consumption Statistics",
+            "name": f"{self.config_entry_title} - Consumption",
             "source": DOMAIN,
             "statistic_id": self.consumption_statistic_id,
             "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
@@ -993,7 +1001,7 @@ class HelenStatisticsManager:
         """
         metadata_kwargs = {
             "has_sum": True,
-            "name": "Helen Energy Hourly Spot Prices",
+            "name": f"{self.config_entry_title} - Spot Prices",
             "source": DOMAIN,
             "statistic_id": self.cost_statistic_id,
             "unit_of_measurement": "EUR",
@@ -1023,7 +1031,7 @@ class HelenStatisticsManager:
         """
         metadata_kwargs = {
             "has_sum": True,
-            "name": "Helen Energy Hourly Fixed Prices",
+            "name": f"{self.config_entry_title} - Fixed Prices",
             "source": DOMAIN,
             "statistic_id": self.fixed_cost_statistic_id,
             "unit_of_measurement": "EUR",

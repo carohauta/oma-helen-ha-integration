@@ -18,7 +18,7 @@ from .const import (
     CONF_VAT,
     DOMAIN,
 )
-from .migration import async_migrate_entry, async_migrate_entities_for_compatibility
+from .migration import async_migrate_entities_for_compatibility, async_migrate_entry
 from .services import async_setup_services, async_unload_services
 
 if TYPE_CHECKING:

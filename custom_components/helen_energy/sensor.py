@@ -28,7 +28,6 @@ from .const import (
     CONF_DEFAULT_BASE_PRICE,
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
-    CONF_ENABLE_STATISTICS_IMPORT,
     CONF_FIXED_PRICE,
     CONF_INCLUDE_TRANSFER_COSTS,
     CONTRACT_TYPE_AUTOMATIC,
@@ -146,6 +145,8 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 hass,
                 helen_api_client,
                 entity_id,
+                config_entry.entry_id,
+                config_entry.title,
                 fixed_unit_price=config_fixed_unit_price,
             )
             _LOGGER.debug(

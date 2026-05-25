@@ -87,19 +87,22 @@ class TestHelenStatisticsManager:
             hass,
             mock_api_client,
             "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
         )
 
         assert manager.hass == hass
         assert manager.api_client == mock_api_client
         assert manager.entity_id == "sensor.helen_monthly_consumption"
+        assert manager.config_entry_title == "Helen Energy (test)"
         assert (
-            manager.consumption_statistic_id == "helen_energy:hourly_energy_consumption"
+            manager.consumption_statistic_id == "helen_energy:hourly_energy_consumption_test_ent"
         )
-        assert manager.cost_statistic_id == "helen_energy:hourly_cost_spot"
+        assert manager.cost_statistic_id == "helen_energy:hourly_cost_spot_test_ent"
 
     def test_convert_to_utc(self, hass: HomeAssistant, mock_api_client):
         """Test timezone conversion from Helsinki to UTC."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         # Test winter time (UTC+2)
         helsinki_winter = "2024-01-15T12:00:00+02:00"
@@ -115,7 +118,7 @@ class TestHelenStatisticsManager:
 
     def test_extract_electricity_value(self, hass: HomeAssistant, mock_api_client):
         """Test extracting electricity value from measurement entry."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         # Test with electricity value present
         entry = Mock(electricity=5.5)
@@ -127,7 +130,7 @@ class TestHelenStatisticsManager:
 
     def test_extract_spot_price_value(self, hass: HomeAssistant, mock_api_client):
         """Test extracting spot price value from measurement entry."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         # Test with spot price value present (in cents)
         entry = Mock(electricity_spot_prices_vat=500.0)  # 500 cents = 5.00 EUR
@@ -141,7 +144,7 @@ class TestHelenStatisticsManager:
         self, hass: HomeAssistant, mock_api_client, mock_hourly_series
     ):
         """Test cumulative total calculation from hourly interval data."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         # Start with cumulative total of 100 kWh and 0 EUR
         last_consumption = 100.0
@@ -182,7 +185,7 @@ class TestHelenStatisticsManager:
         self, hass: HomeAssistant, mock_api_client, mock_hourly_series
     ):
         """Test building consumption and cost statistics."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         # Start with 100 kWh and 50 EUR
         last_consumption = 100.0
@@ -212,7 +215,7 @@ class TestHelenStatisticsManager:
         self, hass: HomeAssistant, mock_api_client
     ):
         """Test handling of missing data (None values)."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
         base_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=helsinki_tz)
@@ -252,7 +255,7 @@ class TestHelenStatisticsManager:
         self, hass: HomeAssistant, mock_api_client
     ):
         """Test filtering of future data (critical - API returns predictions)."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
 
@@ -298,7 +301,7 @@ class TestHelenStatisticsManager:
         self, hass: HomeAssistant, mock_api_client
     ):
         """Test proper timezone conversion in statistics."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
         helsinki_time = datetime(2024, 1, 15, 12, 0, 0, tzinfo=helsinki_tz)
@@ -326,7 +329,7 @@ class TestHelenStatisticsManager:
         self, hass: HomeAssistant, mock_api_client
     ):
         """Test that statistics import skips data at or before last known timestamp."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
         base_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=helsinki_tz)
@@ -378,7 +381,7 @@ class TestHelenStatisticsManager:
         self, hass: HomeAssistant, mock_api_client, mock_measurement_response
     ):
         """Test fetching hourly interval data from API."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         # Create async mock for executor job
         async def async_return(func, *args, **kwargs):
@@ -396,7 +399,7 @@ class TestHelenStatisticsManager:
         self, hass: HomeAssistant, mock_api_client
     ):
         """Test getting last cumulative total when no statistics exist."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         # Mock get_instance and get_last_statistics to return empty result
         mock_instance = Mock()
@@ -419,7 +422,7 @@ class TestHelenStatisticsManager:
     ):
         """Test getting last cumulative total from existing statistics."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.helen_monthly_consumption"
+            hass, mock_api_client, "sensor.helen_monthly_consumption", "test_entry_12345678", "Helen Energy (test)"
         )
 
         # Create async mock - return stats with the new statistic_id format
@@ -427,7 +430,7 @@ class TestHelenStatisticsManager:
 
         async def async_get_stats(*args, **kwargs):
             return {
-                "helen_energy:hourly_energy_consumption": [
+                "helen_energy:hourly_energy_consumption_test_ent": [
                     {"sum": 1234.56, "start": test_timestamp}
                 ]
             }
@@ -456,6 +459,8 @@ class TestHelenStatisticsManager:
             hass,
             mock_api_client,
             "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
         )
 
         test_statistics = [
@@ -489,9 +494,9 @@ class TestHelenStatisticsManager:
 
             if isinstance(metadata, dict):
                 assert metadata["has_sum"] is True
-                assert metadata["name"] == "Helen Energy Hourly Consumption Statistics"
+                assert metadata["name"] == "Helen Energy (test) - Consumption"
                 assert metadata["source"] == "helen_energy"
-                assert metadata["statistic_id"] == "helen_energy:hourly_energy_consumption"
+                assert metadata["statistic_id"] == "helen_energy:hourly_energy_consumption_test_ent"
                 assert metadata["unit_of_measurement"] == UnitOfEnergy.KILO_WATT_HOUR
                 assert metadata["unit_class"] == "energy"
 
@@ -502,9 +507,9 @@ class TestHelenStatisticsManager:
                     assert metadata["has_mean"] is False
             else:
                 assert metadata.has_sum is True
-                assert metadata.name == "Helen Energy Hourly Consumption Statistics"
+                assert metadata.name == "Helen Energy (test) - Consumption"
                 assert metadata.source == "helen_energy"
-                assert metadata.statistic_id == "helen_energy:hourly_energy_consumption"
+                assert metadata.statistic_id == "helen_energy:hourly_energy_consumption_test_ent"
                 assert metadata.unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
                 assert metadata.unit_class == "energy"
 
@@ -526,6 +531,8 @@ class TestHelenStatisticsManager:
             hass,
             mock_api_client,
             "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
         )
 
         test_statistics = [
@@ -550,13 +557,13 @@ class TestHelenStatisticsManager:
             metadata = call_args[0][1]  # Second argument is metadata
 
             if isinstance(metadata, dict):
-                assert metadata["name"] == "Helen Energy Hourly Spot Prices"
-                assert metadata["statistic_id"] == "helen_energy:hourly_cost_spot"
+                assert metadata["name"] == "Helen Energy (test) - Spot Prices"
+                assert metadata["statistic_id"] == "helen_energy:hourly_cost_spot_test_ent"
                 assert metadata["unit_of_measurement"] == "EUR"
                 assert metadata["unit_class"] is None
             else:
-                assert metadata.name == "Helen Energy Hourly Spot Prices"
-                assert metadata.statistic_id == "helen_energy:hourly_cost_spot"
+                assert metadata.name == "Helen Energy (test) - Spot Prices"
+                assert metadata.statistic_id == "helen_energy:hourly_cost_spot_test_ent"
                 assert metadata.unit_of_measurement == "EUR"
                 assert metadata.unit_class is None
 
@@ -569,7 +576,7 @@ class TestHelenStatisticsManager:
     ):
         """Test getting existing statistics in a time window."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.helen_monthly_consumption"
+            hass, mock_api_client, "sensor.helen_monthly_consumption", "test_entry_12345678", "Helen Energy (test)"
         )
 
         start_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=ZoneInfo("UTC"))
@@ -578,7 +585,7 @@ class TestHelenStatisticsManager:
         # Mock statistics_during_period to return some existing data
         async def async_stats_query(*args, **kwargs):
             return {
-                "helen_energy:hourly_energy_consumption": [
+                "helen_energy:hourly_energy_consumption_test_ent": [
                     {"start": start_time.timestamp(), "sum": 10.0},
                     {
                         "start": (start_time + timedelta(hours=1)).timestamp(),
@@ -609,7 +616,7 @@ class TestHelenStatisticsManager:
 
     def test_detect_gaps(self, hass: HomeAssistant, mock_api_client):
         """Test gap detection logic."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test")
+        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
         base_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=helsinki_tz)
@@ -655,7 +662,7 @@ class TestHelenStatisticsManager:
     ):
         """Test getting cumulative value before a timestamp."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.helen_monthly_consumption"
+            hass, mock_api_client, "sensor.helen_monthly_consumption", "test_entry_12345678", "Helen Energy (test)"
         )
 
         query_time = datetime(2024, 5, 15, 5, 0, 0, tzinfo=ZoneInfo("UTC"))
@@ -664,7 +671,7 @@ class TestHelenStatisticsManager:
         async def async_stats_query(*args, **kwargs):
             # Return records up to query_time
             return {
-                "helen_energy:hourly_energy_consumption": [
+                "helen_energy:hourly_energy_consumption_test_ent": [
                     {
                         "start": datetime(
                             2024, 5, 15, 0, 0, 0, tzinfo=ZoneInfo("UTC")
@@ -700,7 +707,7 @@ class TestHelenStatisticsManager:
     ):
         """Test building statistics for gaps with correct cumulative values."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.helen_monthly_consumption"
+            hass, mock_api_client, "sensor.helen_monthly_consumption", "test_entry_12345678", "Helen Energy (test)"
         )
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
@@ -770,7 +777,7 @@ class TestHelenStatisticsManager:
     ):
         """Test building statistics for non-consecutive gaps."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.helen_monthly_consumption"
+            hass, mock_api_client, "sensor.helen_monthly_consumption", "test_entry_12345678", "Helen Energy (test)"
         )
 
         helsinki_tz = ZoneInfo("Europe/Helsinki")
@@ -853,6 +860,8 @@ class TestHelenStatisticsManager:
         # Create manager with fixed unit price (10 cents/kWh = 0.10 EUR/kWh)
         manager = HelenStatisticsManager(
             hass, mock_api_client, "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
             fixed_unit_price=10.0,  # 10 cents/kWh
         )
 
@@ -923,6 +932,8 @@ class TestHelenStatisticsManager:
             hass,
             mock_api_client,
             "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
             fixed_unit_price=10.0,
         )
 
@@ -948,13 +959,13 @@ class TestHelenStatisticsManager:
             metadata = call_args[0][1]  # Second argument is metadata
 
             if isinstance(metadata, dict):
-                assert metadata["name"] == "Helen Energy Hourly Fixed Prices"
-                assert metadata["statistic_id"] == "helen_energy:hourly_cost_fixed"
+                assert metadata["name"] == "Helen Energy (test) - Fixed Prices"
+                assert metadata["statistic_id"] == "helen_energy:hourly_cost_fixed_test_ent"
                 assert metadata["unit_of_measurement"] == "EUR"
                 assert metadata["unit_class"] is None
             else:
-                assert metadata.name == "Helen Energy Hourly Fixed Prices"
-                assert metadata.statistic_id == "helen_energy:hourly_cost_fixed"
+                assert metadata.name == "Helen Energy (test) - Fixed Prices"
+                assert metadata.statistic_id == "helen_energy:hourly_cost_fixed_test_ent"
                 assert metadata.unit_of_measurement == "EUR"
                 assert metadata.unit_class is None
 

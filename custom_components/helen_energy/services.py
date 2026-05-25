@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
 import logging
+from datetime import date
 
 import voluptuous as vol
 from homeassistant.components.recorder import get_instance
@@ -55,19 +55,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             contract_msg,
         )
 
-        # Always clear statistics before backfilling to prevent cumulative chain issues
-        recorder = get_instance(hass)
-        statistic_ids = [
-            "helen_energy:hourly_energy_consumption",
-            "helen_energy:hourly_cost_spot",
-            "helen_energy:hourly_cost_fixed",
-        ]
-        _LOGGER.info("Clearing existing statistics: %s", statistic_ids)
-        recorder.async_clear_statistics(statistic_ids)
-        # Wait a moment for the clear operation to complete
-        import asyncio
-        await asyncio.sleep(1)
-
         # Get all Helen Energy coordinators
         if DOMAIN not in hass.data:
             raise ServiceValidationError("Helen Energy integration not configured")
@@ -87,6 +74,25 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 raise ServiceValidationError(f"Config entry {config_entry_id} not found")
             else:
                 raise ServiceValidationError("No coordinators found")
+
+        # Collect statistics IDs from coordinators that will be backfilled
+        # Always clear statistics before backfilling to prevent cumulative chain issues
+        statistic_ids = []
+        for coordinator in coordinators:
+            if coordinator.statistics_manager:
+                statistic_ids.extend([
+                    coordinator.statistics_manager.consumption_statistic_id,
+                    coordinator.statistics_manager.cost_statistic_id,
+                    coordinator.statistics_manager.fixed_cost_statistic_id,
+                ])
+
+        if statistic_ids:
+            recorder = get_instance(hass)
+            _LOGGER.info("Clearing existing statistics: %s", statistic_ids)
+            recorder.async_clear_statistics(statistic_ids)
+            # Wait a moment for the clear operation to complete
+            import asyncio
+            await asyncio.sleep(1)
 
         # Execute backfill for each coordinator
         success_count = 0

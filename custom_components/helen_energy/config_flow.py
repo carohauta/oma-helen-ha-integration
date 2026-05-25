@@ -1,18 +1,17 @@
 """Config flow for Helen Energy integration."""
 
-from __future__ import annotations
-
 import logging
 from time import time
 from typing import TYPE_CHECKING, Any
 
-import voluptuous as vol
 from helenservice.api_client import HelenApiClient
 from helenservice.api_exceptions import (
     HelenAuthenticationException,
     InvalidDeliverySiteException,
 )
 from helenservice.price_client import HelenPriceClient
+import voluptuous as vol
+
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers import selector
@@ -227,9 +226,15 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         )
 
                 # Create unique ID and title
-                unique_id, title = self._create_unique_id_and_title(
+                unique_id, default_title = self._create_unique_id_and_title(
                     user_input["username"], user_input.get("delivery_site_id")
                 )
+
+                # Use custom name if provided, otherwise use default
+                title = user_input.get("custom_name", "").strip()
+                if not title:
+                    title = default_title
+
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
 
@@ -268,6 +273,9 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         vol.Range(min=0.0, max=100.0),
                         msg="VAT percentage must be between 0 and 100",
                     ),
+                    vol.Required(
+                        "custom_name",
+                    ): str,
                     vol.Required(
                         CONF_CONTRACT_TYPE, default=CONTRACT_TYPE_AUTOMATIC
                     ): selector.SelectSelector(

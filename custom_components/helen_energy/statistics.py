@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from helenservice import RESOLUTION_QUARTER, HelenApiClient
+from helenservice import RESOLUTION_HOUR, RESOLUTION_QUARTER, HelenApiClient
 from helenservice.api_response import (
     MeasurementsWithSpotPriceResponse,
     MeasurementsWithSpotPriceSeries,
@@ -157,6 +157,117 @@ class HelenStatisticsManager:
         except Exception as err:
             _LOGGER.error(
                 "Error importing statistics for %s: %s",
+                self.entity_id,
+                err,
+                exc_info=True,
+            )
+            raise
+
+    async def backfill_statistics(
+        self, start_date: date, end_date: date
+    ) -> None:
+        """Backfill statistics for a custom date range.
+
+        Uses hourly API resolution (not quarter) for larger date ranges.
+        Only fills gaps - skips hours that already have statistics.
+
+        Args:
+            start_date: First date to backfill (inclusive)
+            end_date: Last date to backfill (inclusive)
+        """
+        _LOGGER.info(
+            "Starting backfill for %s: %s to %s (%d days)",
+            self.entity_id,
+            start_date,
+            end_date,
+            (end_date - start_date).days,
+        )
+
+        try:
+            # Fetch hourly data from API
+            response: MeasurementsWithSpotPriceResponse = (
+                await self.hass.async_add_executor_job(
+                    self.api_client.get_measurements_with_spot_prices,
+                    start_date,
+                    end_date,
+                    RESOLUTION_HOUR,  # Use hourly resolution for large ranges
+                )
+            )
+
+            _LOGGER.debug(
+                "Received %d hourly intervals from API (resolution: %s)",
+                len(response.series),
+                response.resolution,
+            )
+
+            if not response.series:
+                _LOGGER.warning("No data received from API for date range")
+                return
+
+            if response.missing_series:
+                _LOGGER.warning(
+                    "API reported %d missing hourly intervals in requested range",
+                    len(response.missing_series),
+                )
+
+            # Get existing statistics in this date range
+            now_utc = datetime.now(ZoneInfo("UTC"))
+            earliest_api_timestamp = min(
+                datetime.fromisoformat(entry.start).astimezone(ZoneInfo("UTC"))
+                for entry in response.series
+            )
+
+            existing_consumption = await self._get_existing_statistics_in_window(
+                self.consumption_statistic_id, earliest_api_timestamp, now_utc
+            )
+
+            _LOGGER.debug(
+                "Found %d existing consumption records in backfill window",
+                len(existing_consumption),
+            )
+
+            # Detect gaps (only import missing hours)
+            gap_series = self._detect_gaps(response.series, existing_consumption)
+
+            if not gap_series:
+                _LOGGER.info("No gaps detected - all data already exists")
+                return
+
+            _LOGGER.info(
+                "Detected %d missing hourly intervals to backfill",
+                len(gap_series),
+            )
+
+            # Build statistics for gaps
+            consumption_stats, cost_stats, fixed_cost_stats = (
+                await self._build_statistics_for_gaps(
+                    gap_series,
+                    self.consumption_statistic_id,
+                    self.cost_statistic_id,
+                    self.fixed_cost_statistic_id,
+                )
+            )
+
+            # Import statistics
+            if consumption_stats:
+                await self._import_consumption_statistics(consumption_stats)
+                await self._import_cost_statistics(cost_stats)
+
+                if fixed_cost_stats:
+                    await self._import_fixed_cost_statistics(fixed_cost_stats)
+
+                _LOGGER.info(
+                    "Backfill complete: imported %d hours for %s (spot_cost=yes, fixed_cost=%s)",
+                    len(consumption_stats),
+                    self.entity_id,
+                    "yes" if fixed_cost_stats else "no",
+                )
+            else:
+                _LOGGER.warning("No valid data to import (missing electricity or prices)")
+
+        except Exception as err:
+            _LOGGER.error(
+                "Error during backfill for %s: %s",
                 self.entity_id,
                 err,
                 exc_info=True,

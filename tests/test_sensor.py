@@ -44,7 +44,7 @@ class TestHelenDataCoordinator:
 
         assert DOMAIN in hass.data
         assert mock_config_entry.entry_id in hass.data[DOMAIN]
-        coordinator = hass.data[DOMAIN][mock_config_entry.entry_id]
+        coordinator = hass.data[DOMAIN][mock_config_entry.entry_id]["coordinator"]
         assert coordinator.name == "Helen Energy"
         assert coordinator.config_entry is mock_config_entry
 
@@ -59,7 +59,7 @@ class TestHelenDataCoordinator:
         await _setup_entry(hass, mock_config_entry)
         coordinator: HelenDataCoordinator = hass.data[DOMAIN][
             mock_config_entry.entry_id
-        ]
+        ]["coordinator"]
 
         # Record the state after a successful first refresh
         initial_data = dict(coordinator.data)

@@ -343,7 +343,9 @@ async def async_setup_entry(
     hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities
 ) -> None:
     """Set up the Helen Energy sensors from a config entry."""
-    coordinator: HelenDataCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator: HelenDataCoordinator = hass.data[DOMAIN][config_entry.entry_id][
+        "coordinator"
+    ]
 
     is_fixed_price = config_entry.data.get(CONF_FIXED_PRICE, False)
     default_unit_price = config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)

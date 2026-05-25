@@ -1,0 +1,23 @@
+backfill_statistics:
+  name: Backfill statistics
+  description: |
+    Import historical electricity consumption and cost statistics from Helen API.
+
+    - Backfills from start_date to today
+    - Automatically clears existing statistics first
+    - Select a specific contract, or leave blank to backfill all contracts
+  fields:
+    start_date:
+      name: Start date
+      description: First date to backfill (inclusive). Will backfill from this date to today.
+      required: true
+      example: "2024-01-01"
+      selector:
+        date:
+    config_entry_id:
+      name: Contract
+      description: Which Helen Energy contract to backfill. If not specified, backfills all contracts.
+      required: false
+      selector:
+        config_entry:
+          integration: helen_energy

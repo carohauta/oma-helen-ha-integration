@@ -19,6 +19,7 @@ from .const import (
     DOMAIN,
 )
 from .migration import async_migrate_entry, async_migrate_entities_for_compatibility
+from .services import async_setup_services, async_unload_services
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -134,7 +135,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Must be called while the entry is still in SETUP_IN_PROGRESS state.
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    # Store coordinator in hass.data for service access
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "coordinator": coordinator,
+    }
+
+    # Register services (only once, when first entry is set up)
+    if len(hass.data[DOMAIN]) == 1:
+        await async_setup_services(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -145,4 +153,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id)
+
+        # Unload services if this is the last entry
+        if not hass.data[DOMAIN]:
+            await async_unload_services(hass)
+
     return unloaded

@@ -1,17 +1,18 @@
 """Config flow for Helen Energy integration."""
 
+from __future__ import annotations
+
 import logging
 from time import time
 from typing import TYPE_CHECKING, Any
 
+import voluptuous as vol
 from helenservice.api_client import HelenApiClient
 from helenservice.api_exceptions import (
     HelenAuthenticationException,
     InvalidDeliverySiteException,
 )
 from helenservice.price_client import HelenPriceClient
-import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers import selector
@@ -268,14 +269,14 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required("username"): str,
                     vol.Required("password"): str,
+                    vol.Required(
+                        "custom_name",
+                    ): str,
                     vol.Required("vat", default=25.5): vol.All(
                         vol.Coerce(float),
                         vol.Range(min=0.0, max=100.0),
                         msg="VAT percentage must be between 0 and 100",
                     ),
-                    vol.Required(
-                        "custom_name",
-                    ): str,
                     vol.Required(
                         CONF_CONTRACT_TYPE, default=CONTRACT_TYPE_AUTOMATIC
                     ): selector.SelectSelector(

@@ -56,7 +56,7 @@ class TestHelenConfigFlow:
         assert data[CONF_PASSWORD] == "testpass"
         assert data[CONF_VAT] == 25.5
         # Statistics import is enabled by default
-        assert data[CONF_ENABLE_STATISTICS_IMPORT] == True
+        assert data[CONF_ENABLE_STATISTICS_IMPORT]
         assert len(data) == 4  # Required fields + statistics enable flag
 
     def test_build_entry_data_full(self):
@@ -82,5 +82,5 @@ class TestHelenConfigFlow:
         assert data[CONF_DEFAULT_UNIT_PRICE] == 8.5
         assert data[CONF_DEFAULT_BASE_PRICE] == 5.0
         assert data[CONF_DELIVERY_SITE_ID] == "12345"
-        assert data[CONF_INCLUDE_TRANSFER_COSTS] == True
+        assert data[CONF_INCLUDE_TRANSFER_COSTS]
         assert data[CONF_CONTRACT_TYPE] == "fixed"

@@ -2,8 +2,7 @@
 
 from unittest.mock import patch
 
-import pytest
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -14,7 +13,6 @@ from custom_components.helen_energy.const import (
     CONF_INCLUDE_TRANSFER_COSTS,
     CONF_VAT,
     CONTRACT_TYPE_EXCHANGE,
-    CONTRACT_TYPE_FIXED,
     CONTRACT_TYPE_MARKET,
     DOMAIN,
 )

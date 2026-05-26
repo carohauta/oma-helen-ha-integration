@@ -81,8 +81,6 @@ The statistics include:
 - **Hourly spot price costs** (EUR) - Available for exchange/market price contracts
 - **Hourly fixed price costs** (EUR) - Available for fixed price contracts
 
-**Note**: Statistics import can be disabled in the integration options if you prefer not to use this feature.
-
 ### Backfill Historical Data
 
 If you want to import historical consumption data beyond the automatic 72-hour backfill, use the `helen_energy.backfill_statistics` service.

@@ -64,6 +64,67 @@ The integration also supports HA energy dashboard via the following entity:
 
 The `state` of the sensor is the total energy consumption (in kWh) of the ongoing month.
 
+### Energy Dashboard Integration
+
+The integration automatically imports **hourly consumption statistics** into Home Assistant's energy dashboard. This allows you to:
+- Track your energy consumption hour-by-hour in the energy dashboard
+- View detailed consumption graphs and patterns
+- Compare consumption across different time periods
+- See cost breakdowns (spot prices, fixed prices, etc.)
+
+**Statistics are automatically enabled** for new installations. When you first set up the integration, it will:
+1. Automatically backfill the last **72 hours** of consumption data
+2. Continue importing new hourly data as it becomes available from Helen's API
+
+The statistics include:
+- **Hourly energy consumption** (kWh) - Main consumption data for the energy dashboard
+- **Hourly spot price costs** (EUR) - Available for exchange/market price contracts
+- **Hourly fixed price costs** (EUR) - Available for fixed price contracts
+
+**Note**: Statistics import can be disabled in the integration options if you prefer not to use this feature.
+
+### Backfill Historical Data
+
+If you want to import historical consumption data beyond the automatic 72-hour backfill, use the `helen_energy.backfill_statistics` service.
+
+**Service Parameters:**
+- `start_date` (required): The date to start backfilling from (format: YYYY-MM-DD)
+- `config_entry_id` (optional): Target a specific Helen Energy entry. If omitted, backfills all configured entries.
+
+**Limitations:**
+- Maximum backfill range: 365 days (1 year)
+- Always backfills from start_date to today
+- Old statistics in the date range will be cleared before backfilling to ensure data consistency
+
+**Example service calls:**
+
+Backfill the last 30 days for all Helen Energy entries:
+```yaml
+service: helen_energy.backfill_statistics
+data:
+  start_date: "2026-04-26"
+```
+
+Backfill the last 90 days for a specific entry:
+```yaml
+service: helen_energy.backfill_statistics
+data:
+  start_date: "2026-02-25"
+  config_entry_id: "your_config_entry_id_here"
+```
+
+**Finding your config_entry_id:**
+1. Go to Settings → Devices & Services → Helen Energy Price
+2. Click on the three dots menu for your entry → Download diagnostics
+3. Look for the `entry_id` field in the downloaded JSON file
+
+**When to use backfill:**
+- You want to see historical consumption in your energy dashboard
+- You've disabled statistics import and want to re-enable it with historical data
+- Helen's API had temporary issues and some hours are missing
+
+**Note:** Backfilling large date ranges (especially 6+ months) may take several minutes to complete. The service runs in the background, so you can continue using Home Assistant normally.
+
 ### Examples
 
 Template sensor configuration examples. Use these template sensors if you wish to extract additional data from each sensor entity's attributes (unit price, daily average consumption etc.)

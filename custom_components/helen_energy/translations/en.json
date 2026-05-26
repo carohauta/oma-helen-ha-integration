@@ -33,8 +33,7 @@
       "cannot_connect": "Connection to Oma Helen failed. Check your internet connection and try again. If the problem persists, the service may be temporarily unavailable.",
       "invalid_auth": "Invalid username or password. Check your credentials and try again.",
       "invalid_delivery_site_id": "Invalid delivery site ID. Check that the ID exists.",
-      "contract_type_not_detected": "Contract type could not be detected. Please select your contract type manually.",
-      "contract_type_not_resolved": "The contract type {contract_type} could not be reliably resolved. Please select your contract type manually.",
+      "automatic_detection_failed": "Could not automatically detect your contract type (detected: {detected_type}). Please select your contract type manually from the options below.",
       "unknown": "An unexpected error occurred. Please check the logs for more details."
     },
     "abort": {

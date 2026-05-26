@@ -135,29 +135,38 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return {"base": "cannot_connect"}
 
     async def _validate_contract_type(self) -> tuple[bool, str | None]:
-        """Validate that the contract type is supported."""
+        """Validate that the contract type is supported.
+
+        Returns:
+            tuple: (is_supported, detected_type)
+                - is_supported: True if detection succeeded and type is supported
+                - detected_type: The mapped contract type constant (fixed/market/exchange)
+                               if supported, or the raw API type if unsupported
+        """
         if self.api_client is None:
             raise ValueError("API client not initialized")
 
         try:
-            contract_type = await self.hass.async_add_executor_job(
+            api_contract_type = await self.hass.async_add_executor_job(
                 self.api_client.get_contract_type
             )
 
             # If contract type is None, we cannot automatically detect it
-            if contract_type is None:
+            if api_contract_type is None:
                 return False, None
 
-            # Check if contract type is supported
-            supported_types = ["PERUS", "KAYTTO", "MARK", "PORS", "VALTTI"]
-            if any(
-                supported_type in contract_type for supported_type in supported_types
-            ):
-                return True, None
-            return False, contract_type
+            # Map API contract type to our constants
+            if any(x in api_contract_type for x in ["PERUS", "KAYTTO"]):
+                return True, CONTRACT_TYPE_FIXED
+            elif "MARK" in api_contract_type:
+                return True, CONTRACT_TYPE_MARKET
+            elif any(x in api_contract_type for x in ["PORS", "VALTTI"]):
+                return True, CONTRACT_TYPE_EXCHANGE
+            else:
+                # Unsupported contract type - return raw API type for error message
+                return False, api_contract_type
         except Exception as ex:
             _LOGGER.warning("Could not validate contract type: %s", ex)
-            # If we can't validate due to an exception, also return failure
             return False, None
 
     async def _cleanup_resources(self) -> None:
@@ -209,22 +218,20 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 # Validate contract type only when AUTOMATIC is selected
                 if user_input.get(CONF_CONTRACT_TYPE) == CONTRACT_TYPE_AUTOMATIC:
-                    is_supported, contract_type = await self._validate_contract_type()
+                    is_supported, detected_type = await self._validate_contract_type()
                     if not is_supported:
                         await self._cleanup_resources()
-                        error_key = (
-                            "contract_type_not_detected"
-                            if contract_type is None
-                            else "contract_type_not_resolved"
-                        )
                         return self.async_show_form(
                             step_id="user",
                             data_schema=self._get_user_schema(user_input),
-                            errors={"base": error_key},
+                            errors={CONF_CONTRACT_TYPE: "automatic_detection_failed"},
                             description_placeholders={
-                                "contract_type": contract_type or "None"
+                                "detected_type": detected_type or "unknown"
                             },
                         )
+                    # Replace AUTOMATIC with the detected type before storing
+                    user_input[CONF_CONTRACT_TYPE] = detected_type
+                    _LOGGER.info("Automatic detection succeeded: contract type = %s", detected_type)
 
                 # Create unique ID and title
                 unique_id, default_title = self._create_unique_id_and_title(

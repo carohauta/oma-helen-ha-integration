@@ -32,6 +32,13 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     version = config_entry.version
     _LOGGER.info("Migrating Helen Energy config entry from version %s", version)
 
+    if version > 2:
+        # Downgrade from a newer schema version is not supported
+        _LOGGER.error(
+            "Cannot downgrade Helen Energy config entry from version %s", version
+        )
+        return False
+
     if version == 1:
         # Create new data dict with migrated data
         new_data = {**config_entry.data}
@@ -40,14 +47,12 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         if "include_transfer_costs" not in new_data:
             new_data["include_transfer_costs"] = False
 
-        # Update entry
         hass.config_entries.async_update_entry(
             config_entry,
             data=new_data,
             title=f"Helen Energy ({config_entry.data[CONF_USERNAME]})",
+            version=2,
         )
-
-        config_entry.version = 2
 
     # Migrate entities to preserve history
     await async_migrate_entities_for_compatibility(hass, config_entry)
@@ -139,11 +144,6 @@ def get_legacy_entity_name(sensor_type: str) -> str:
     return legacy_names.get(
         sensor_type, f"Helen {sensor_type.replace('_', ' ').title()}"
     )
-
-
-def should_preserve_legacy_entity_id(sensor_type: str) -> bool:
-    """Check if we should try to preserve the legacy entity ID."""
-    return sensor_type in list(LEGACY_ENTITY_MAPPINGS.values())
 
 
 def should_use_legacy_names(hass, config_entry) -> bool:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -23,25 +24,15 @@ except ImportError:
     HAS_MEAN_TYPE = False
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
-    get_last_statistics,
     statistics_during_period,
 )
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, STATISTICS_BACKFILL_HOURS
+from .utils import safe_round
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def safe_round(value: float | None, decimals: int = 2) -> float:
-    """Safely round a value, returning 0.0 if value is None or non-numeric."""
-    if value is None:
-        return 0.0
-    try:
-        return round(float(value), decimals)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 class HelenStatisticsManager:
@@ -95,73 +86,9 @@ class HelenStatisticsManager:
         _LOGGER.debug("Starting statistics import for %s", self.entity_id)
 
         try:
-            # Fetch 15-minute interval data and aggregate to hourly
+            # Fetch 15-minute interval data, aggregate to hourly, fill any gaps
             series = await self._fetch_interval_data()
-
-            if not series:
-                _LOGGER.warning("No interval data received from API")
-                return
-
-            # Find the time range of API data (use earliest API timestamp as start)
-            now_utc = datetime.now(ZoneInfo("UTC"))
-            api_timestamps = [
-                datetime.fromisoformat(entry.start).astimezone(ZoneInfo("UTC"))
-                for entry in series
-            ]
-            earliest_api_timestamp = min(api_timestamps)
-
-            # Get existing statistics covering the full API data range
-            existing_consumption = await self._get_existing_statistics_in_window(
-                self.consumption_statistic_id, earliest_api_timestamp, now_utc
-            )
-            existing_cost = await self._get_existing_statistics_in_window(
-                self.cost_statistic_id, earliest_api_timestamp, now_utc
-            )
-
-            _LOGGER.debug(
-                "Found %d existing consumption records, %d existing cost records in backfill window",
-                len(existing_consumption),
-                len(existing_cost),
-            )
-
-            # Detect gaps (missing timestamps)
-            gap_series = self._detect_gaps(series, existing_consumption)
-
-            if not gap_series:
-                _LOGGER.debug("No gaps detected, all data already imported")
-                return
-
-            _LOGGER.info(
-                "Detected %d missing hourly intervals, filling gaps",
-                len(gap_series),
-            )
-
-            # Build statistics for gaps only
-            consumption_stats, cost_stats, fixed_cost_stats = await self._build_statistics_for_gaps(
-                gap_series,
-                self.consumption_statistic_id,
-                self.cost_statistic_id,
-                self.fixed_cost_statistic_id,
-            )
-
-            # Import gap-filling statistics
-            if consumption_stats:
-                await self._import_consumption_statistics(consumption_stats)
-                await self._import_cost_statistics(cost_stats)
-
-                # Import fixed cost statistics if we have fixed price data
-                if fixed_cost_stats:
-                    await self._import_fixed_cost_statistics(fixed_cost_stats)
-
-                _LOGGER.info(
-                    "Successfully filled %d gaps in statistics for %s (fixed_cost=%s)",
-                    len(consumption_stats),
-                    self.entity_id,
-                    "yes" if fixed_cost_stats else "no",
-                )
-            else:
-                _LOGGER.debug("No valid gap data to import (missing electricity or prices)")
-
+            await self._fill_gaps(series)
         except Exception as err:
             _LOGGER.error(
                 "Error importing statistics for %s: %s",
@@ -170,6 +97,90 @@ class HelenStatisticsManager:
                 exc_info=True,
             )
             raise
+
+    async def _fill_gaps(
+        self, series: list[MeasurementsWithSpotPriceSeries]
+    ) -> None:
+        """Detect missing hours in `series` and import statistics for them.
+
+        Shared by import_recent_statistics and backfill_statistics: queries
+        existing statistics over the data window, finds gaps, builds cumulative
+        statistics for the missing hours, and imports the three streams.
+
+        Args:
+            series: Hourly measurement series from the API
+        """
+        if not series:
+            _LOGGER.warning("No interval data to process")
+            return
+
+        # Get existing statistics covering the full API data range
+        now_utc = datetime.now(ZoneInfo("UTC"))
+        earliest_api_timestamp = min(
+            datetime.fromisoformat(entry.start).astimezone(ZoneInfo("UTC"))
+            for entry in series
+        )
+        existing_consumption = await self._get_existing_statistics_in_window(
+            self.consumption_statistic_id, earliest_api_timestamp, now_utc
+        )
+        _LOGGER.debug(
+            "Found %d existing consumption records in window",
+            len(existing_consumption),
+        )
+
+        # Detect gaps (missing timestamps)
+        gap_series = self._detect_gaps(series, existing_consumption)
+        if not gap_series:
+            _LOGGER.debug("No gaps detected, all data already imported")
+            return
+
+        _LOGGER.info(
+            "Detected %d missing hourly intervals, filling gaps", len(gap_series)
+        )
+
+        # Build statistics for gaps only
+        consumption_stats, cost_stats, fixed_cost_stats = (
+            await self._build_statistics_for_gaps(
+                gap_series,
+                self.consumption_statistic_id,
+                self.cost_statistic_id,
+                self.fixed_cost_statistic_id,
+            )
+        )
+
+        if not consumption_stats:
+            _LOGGER.debug("No valid gap data to import (missing electricity or prices)")
+            return
+
+        await self._import_statistics(
+            self.consumption_statistic_id,
+            f"{self.config_entry_title} - Consumption",
+            UnitOfEnergy.KILO_WATT_HOUR,
+            "energy",
+            consumption_stats,
+        )
+        await self._import_statistics(
+            self.cost_statistic_id,
+            f"{self.config_entry_title} - Spot Prices",
+            "EUR",
+            None,  # unit_class None for currency; may need revisiting in HA 2026.11
+            cost_stats,
+        )
+        if fixed_cost_stats:
+            await self._import_statistics(
+                self.fixed_cost_statistic_id,
+                f"{self.config_entry_title} - Fixed Prices",
+                "EUR",
+                None,
+                fixed_cost_stats,
+            )
+
+        _LOGGER.info(
+            "Successfully filled %d gaps for %s (fixed_cost=%s)",
+            len(consumption_stats),
+            self.entity_id,
+            "yes" if fixed_cost_stats else "no",
+        )
 
     async def backfill_statistics(
         self, start_date: date, end_date: date
@@ -218,60 +229,7 @@ class HelenStatisticsManager:
                     len(response.missing_series),
                 )
 
-            # Get existing statistics in this date range
-            now_utc = datetime.now(ZoneInfo("UTC"))
-            earliest_api_timestamp = min(
-                datetime.fromisoformat(entry.start).astimezone(ZoneInfo("UTC"))
-                for entry in response.series
-            )
-
-            existing_consumption = await self._get_existing_statistics_in_window(
-                self.consumption_statistic_id, earliest_api_timestamp, now_utc
-            )
-
-            _LOGGER.debug(
-                "Found %d existing consumption records in backfill window",
-                len(existing_consumption),
-            )
-
-            # Detect gaps (only import missing hours)
-            gap_series = self._detect_gaps(response.series, existing_consumption)
-
-            if not gap_series:
-                _LOGGER.info("No gaps detected - all data already exists")
-                return
-
-            _LOGGER.info(
-                "Detected %d missing hourly intervals to backfill",
-                len(gap_series),
-            )
-
-            # Build statistics for gaps
-            consumption_stats, cost_stats, fixed_cost_stats = (
-                await self._build_statistics_for_gaps(
-                    gap_series,
-                    self.consumption_statistic_id,
-                    self.cost_statistic_id,
-                    self.fixed_cost_statistic_id,
-                )
-            )
-
-            # Import statistics
-            if consumption_stats:
-                await self._import_consumption_statistics(consumption_stats)
-                await self._import_cost_statistics(cost_stats)
-
-                if fixed_cost_stats:
-                    await self._import_fixed_cost_statistics(fixed_cost_stats)
-
-                _LOGGER.info(
-                    "Backfill complete: imported %d hours for %s (spot_cost=yes, fixed_cost=%s)",
-                    len(consumption_stats),
-                    self.entity_id,
-                    "yes" if fixed_cost_stats else "no",
-                )
-            else:
-                _LOGGER.warning("No valid data to import (missing electricity or prices)")
+            await self._fill_gaps(response.series)
 
         except Exception as err:
             _LOGGER.error(
@@ -341,8 +299,6 @@ class HelenStatisticsManager:
         Returns:
             List of hourly measurement intervals with summed consumption and averaged prices
         """
-        from collections import defaultdict
-
         # Group intervals by hour
         hourly_data = defaultdict(list)
 
@@ -418,79 +374,7 @@ class HelenStatisticsManager:
 
             hourly_series.append(hourly_entry)
 
-        # Deduplicate hourly entries by timestamp (shouldn't happen, but defensive)
-        seen_timestamps = set()
-        deduplicated_series = []
-        for entry in hourly_series:
-            if entry.start not in seen_timestamps:
-                seen_timestamps.add(entry.start)
-                deduplicated_series.append(entry)
-            else:
-                _LOGGER.warning(
-                    "Duplicate hourly entry detected for %s - this should not happen!",
-                    entry.start,
-                )
-
-        if len(deduplicated_series) < len(hourly_series):
-            _LOGGER.error(
-                "Removed %d duplicate hourly entries during aggregation",
-                len(hourly_series) - len(deduplicated_series),
-            )
-
-        return deduplicated_series
-
-    async def _get_last_cumulative_total(
-        self, statistic_id: str
-    ) -> tuple[float, datetime | None]:
-        """Get the last cumulative total and timestamp from existing statistics.
-
-        Args:
-            statistic_id: The statistic ID to query
-
-        Returns:
-            Tuple of (last_sum, last_timestamp) - sum in appropriate units, timestamp or None
-        """
-        try:
-            last_stats = await get_instance(self.hass).async_add_executor_job(
-                get_last_statistics,
-                self.hass,
-                1,  # number of stats to retrieve
-                statistic_id,  # statistic_id
-                True,  # convert_units
-                {"sum"},  # types to retrieve
-            )
-
-            if statistic_id in last_stats and last_stats[statistic_id]:
-                stat = last_stats[statistic_id][0]
-                last_sum = stat.get("sum", 0.0)
-                last_timestamp_raw = stat.get("start")
-
-                # Convert Unix timestamp to datetime if present
-                last_timestamp = None
-                if last_timestamp_raw is not None:
-                    # Handle both Unix timestamp (float) and datetime objects
-                    if isinstance(last_timestamp_raw, datetime):
-                        last_timestamp = last_timestamp_raw
-                    else:
-                        # Convert Unix timestamp to datetime
-                        last_timestamp = datetime.fromtimestamp(
-                            last_timestamp_raw, tz=ZoneInfo("UTC")
-                        )
-
-                return safe_round(last_sum), last_timestamp
-
-            _LOGGER.debug(
-                "No existing statistics found for %s, starting from 0.0", statistic_id
-            )
-            return 0.0, None
-
-        except Exception as err:
-            _LOGGER.warning(
-                "Error querying last statistics for %s, starting from 0.0: %s",
-                statistic_id,
-                err,
-            )
-            return 0.0, None
+        return hourly_series
 
     async def _get_existing_statistics_in_window(
         self, statistic_id: str, start_time: datetime, end_time: datetime
@@ -805,118 +689,6 @@ class HelenStatisticsManager:
 
         return consumption_stats, cost_stats, fixed_cost_stats
 
-    def _build_statistics_from_intervals(
-        self,
-        series: list[MeasurementsWithSpotPriceSeries],
-        last_consumption_cumulative: float,
-        last_cost_cumulative: float,
-        last_timestamp: datetime | None = None,
-    ) -> tuple[list[StatisticData], list[StatisticData]]:
-        """Build statistics from hourly interval data.
-
-        Only imports intervals AFTER last_timestamp to prevent duplicate imports
-        that would cause cumulative values to grow incorrectly.
-
-        Args:
-            series: List of hourly measurement intervals from API
-            last_consumption_cumulative: Last known cumulative consumption (kWh)
-            last_cost_cumulative: Last known cumulative cost (EUR)
-            last_timestamp: Last statistics timestamp (UTC), skip data at or before this
-
-        Returns:
-            Tuple of (consumption_statistics, cost_statistics)
-        """
-        consumption_statistics = []
-        cost_statistics = []
-        cumulative_consumption = last_consumption_cumulative
-        cumulative_cost = last_cost_cumulative
-        now_utc = datetime.now(ZoneInfo("UTC"))
-        future_count = 0
-        missing_count = 0
-
-        for entry in series:
-            # Parse timestamp and convert to UTC
-            try:
-                utc_time = self._convert_to_utc(entry.start)
-            except Exception as err:
-                _LOGGER.warning("Failed to parse timestamp %s: %s", entry.start, err)
-                continue
-
-            # Normalize timestamp: strip microseconds and ensure it's at top of hour
-            # This is CRITICAL for HA statistics deduplication
-            utc_time = utc_time.replace(minute=0, second=0, microsecond=0)
-
-            # Verify timestamp is at top of hour (should already be from aggregation)
-            if utc_time.minute != 0 or utc_time.second != 0:
-                _LOGGER.warning("Received non-hourly timestamp from API: %s", utc_time)
-                continue
-
-            # Filter out future data (API can return predictions)
-            if utc_time > now_utc:
-                future_count += 1
-                continue
-
-            # Skip data at or before last known timestamp to prevent duplicates
-            if last_timestamp is not None and utc_time <= last_timestamp:
-                continue
-
-            # Extract electricity consumption (kWh)
-            electricity = self._extract_electricity_value(entry)
-            if electricity is None:
-                missing_count += 1
-                continue
-
-            # Extract spot price (EUR/kWh including VAT)
-            spot_price = self._extract_spot_price_value(entry)
-            if spot_price is None:
-                _LOGGER.warning(
-                    "Missing spot price for timestamp %s, skipping cost statistics",
-                    utc_time,
-                )
-                missing_count += 1
-                continue
-
-            # Calculate hourly cost (kWh * EUR/kWh = EUR)
-            hourly_cost = electricity * spot_price
-
-            # Add to cumulative totals
-            cumulative_consumption += electricity
-            cumulative_cost += hourly_cost
-
-            # Create consumption statistics data point (cumulative)
-            stat_data = StatisticData(
-                start=utc_time,
-                state=safe_round(cumulative_consumption),
-                sum=safe_round(cumulative_consumption),
-            )
-            consumption_statistics.append(stat_data)
-
-            # Create cost statistics data point (cumulative)
-            cost_statistics.append(
-                StatisticData(
-                    start=utc_time,
-                    state=safe_round(cumulative_cost),
-                    sum=safe_round(cumulative_cost),
-                )
-            )
-
-        # Log filtering results
-        if future_count > 0:
-            _LOGGER.debug("Filtered out %d future intervals", future_count)
-        if missing_count > 0:
-            _LOGGER.debug("Skipped %d intervals with missing data", missing_count)
-
-        _LOGGER.debug(
-            "Built %d NEW hourly statistics entries (skipped data at or before %s). "
-            "Final cumulative: consumption=%.2f kWh, cost=%.2f EUR",
-            len(consumption_statistics),
-            last_timestamp.isoformat() if last_timestamp else "none",
-            cumulative_consumption,
-            cumulative_cost,
-        )
-
-        return consumption_statistics, cost_statistics
-
     def _convert_to_utc(self, helsinki_timestamp: str) -> datetime:
         """Convert Helsinki timezone timestamp to UTC.
 
@@ -964,21 +736,30 @@ class HelenStatisticsManager:
 
         return entry.electricity_spot_prices_vat / 100.0
 
-    async def _import_consumption_statistics(
-        self, statistics: list[StatisticData]
+    async def _import_statistics(
+        self,
+        statistic_id: str,
+        name: str,
+        unit_of_measurement: str,
+        unit_class: str | None,
+        statistics: list[StatisticData],
     ) -> None:
-        """Import consumption statistics into Home Assistant database.
+        """Import a cumulative statistics stream into the HA database.
 
         Args:
+            statistic_id: External statistic ID
+            name: Human-readable statistic name
+            unit_of_measurement: Unit (e.g. kWh or EUR)
+            unit_class: HA unit class, or None for currency
             statistics: List of StatisticData to import
         """
         metadata_kwargs = {
             "has_sum": True,
-            "name": f"{self.config_entry_title} - Consumption",
+            "name": name,
             "source": DOMAIN,
-            "statistic_id": self.consumption_statistic_id,
-            "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
-            "unit_class": "energy",
+            "statistic_id": statistic_id,
+            "unit_of_measurement": unit_of_measurement,
+            "unit_class": unit_class,
         }
 
         if HAS_MEAN_TYPE:
@@ -988,64 +769,4 @@ class HelenStatisticsManager:
 
         metadata = StatisticMetaData(**metadata_kwargs)
         async_add_external_statistics(self.hass, metadata, statistics)
-        _LOGGER.debug(
-            "Consumption statistics imported successfully for %s",
-            self.consumption_statistic_id,
-        )
-
-    async def _import_cost_statistics(self, statistics: list[StatisticData]) -> None:
-        """Import cost statistics into Home Assistant database.
-
-        Args:
-            statistics: List of StatisticData to import
-        """
-        metadata_kwargs = {
-            "has_sum": True,
-            "name": f"{self.config_entry_title} - Spot Prices",
-            "source": DOMAIN,
-            "statistic_id": self.cost_statistic_id,
-            "unit_of_measurement": "EUR",
-            "unit_class": None,  # Might break in 2026.11
-        }
-
-        if HAS_MEAN_TYPE:
-            metadata_kwargs["mean_type"] = StatisticMeanType.NONE
-        else:
-            metadata_kwargs["has_mean"] = False
-
-        metadata = StatisticMetaData(**metadata_kwargs)
-        async_add_external_statistics(self.hass, metadata, statistics)
-        _LOGGER.debug(
-            "Cost statistics imported successfully for %s", self.cost_statistic_id
-        )
-
-    async def _import_fixed_cost_statistics(
-        self, statistics: list[StatisticData]
-    ) -> None:
-        """Import fixed cost statistics into Home Assistant database.
-
-        Fixed cost uses a constant unit price instead of spot prices.
-
-        Args:
-            statistics: List of StatisticData to import
-        """
-        metadata_kwargs = {
-            "has_sum": True,
-            "name": f"{self.config_entry_title} - Fixed Prices",
-            "source": DOMAIN,
-            "statistic_id": self.fixed_cost_statistic_id,
-            "unit_of_measurement": "EUR",
-            "unit_class": None,
-        }
-
-        if HAS_MEAN_TYPE:
-            metadata_kwargs["mean_type"] = StatisticMeanType.NONE
-        else:
-            metadata_kwargs["has_mean"] = False
-
-        metadata = StatisticMetaData(**metadata_kwargs)
-        async_add_external_statistics(self.hass, metadata, statistics)
-        _LOGGER.debug(
-            "Fixed cost statistics imported successfully for %s",
-            self.fixed_cost_statistic_id,
-        )
+        _LOGGER.debug("Statistics imported successfully for %s", statistic_id)

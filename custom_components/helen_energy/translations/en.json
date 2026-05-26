@@ -38,7 +38,10 @@
     },
     "abort": {
       "already_configured": "Account is already configured",
-      "reauth_successful": "Reauthentication was successful"
+      "reauth_successful": "Reauthentication was successful",
+      "reauth_failed": "Reauthentication failed. Please try again.",
+      "invalid_auth": "Invalid username or password. Check your credentials and try again.",
+      "unknown": "An unexpected error occurred. Please check the logs for more details."
     }
   },
   "selector": {

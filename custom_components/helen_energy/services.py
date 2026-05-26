@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date
 
@@ -91,7 +92,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             _LOGGER.info("Clearing existing statistics: %s", statistic_ids)
             recorder.async_clear_statistics(statistic_ids)
             # Wait a moment for the clear operation to complete
-            import asyncio
             await asyncio.sleep(1)
 
         # Execute backfill for each coordinator

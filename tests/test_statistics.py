@@ -43,32 +43,6 @@ def mock_measurement_series():
 
 
 @pytest.fixture
-def mock_hourly_series():
-    """Create mock hourly measurement series spanning 3 hours.
-
-    This is used for tests that call _build_statistics_from_intervals directly,
-    since aggregation from 15-min to hourly happens in _fetch_interval_data.
-    """
-    helsinki_tz = ZoneInfo("Europe/Helsinki")
-    base_time = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
-
-    series = []
-    # Create 3 hourly entries
-    for i in range(3):
-        start_time = base_time + timedelta(hours=i)
-        series.append(
-            Mock(
-                start=start_time.isoformat(),
-                stop=(start_time + timedelta(hours=1)).isoformat(),
-                electricity=2.0,  # 2.0 kWh per hour
-                electricity_spot_prices_vat=500.0,  # 5.00 EUR/kWh (cents)
-            )
-        )
-
-    return series
-
-
-@pytest.fixture
 def mock_measurement_response(mock_measurement_series):
     """Mock API response for 15-minute measurements."""
     mock_response = Mock()
@@ -140,243 +114,6 @@ class TestHelenStatisticsManager:
         entry = Mock(electricity_spot_prices_vat=None)
         assert manager._extract_spot_price_value(entry) is None
 
-    def test_build_statistics_cumulative_calculation(
-        self, hass: HomeAssistant, mock_api_client, mock_hourly_series
-    ):
-        """Test cumulative total calculation from hourly interval data."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
-
-        # Start with cumulative total of 100 kWh and 0 EUR
-        last_consumption = 100.0
-        last_cost = 0.0
-
-        consumption_stats, cost_stats = (
-            manager._build_statistics_from_intervals(
-                mock_hourly_series, last_consumption, last_cost
-            )
-        )
-
-        # Should have 3 hourly entries
-        assert len(consumption_stats) == 3
-
-        # Each hour adds 2.0 kWh, so final cumulative should be 100 + 6.0 = 106.0
-        assert consumption_stats[-1]["sum"] == 106.0
-        assert consumption_stats[-1]["state"] == 106.0
-
-        # First hourly entry should be 102.0
-        assert consumption_stats[0]["sum"] == 102.0
-
-        # Each statistic should have timestamps at top of hour
-        for stat in consumption_stats:
-            assert stat["start"].minute == 0
-            assert stat["start"].second == 0
-
-        # Verify all are StatisticData dicts with proper structure
-        for stat in consumption_stats:
-            assert isinstance(stat, dict)
-            assert "start" in stat
-            assert "sum" in stat
-            assert "state" in stat
-            assert (
-                stat["sum"] == stat["state"]
-            )  # For TOTAL sensors, sum and state are the same
-
-    def test_build_statistics_with_prices_and_costs(
-        self, hass: HomeAssistant, mock_api_client, mock_hourly_series
-    ):
-        """Test building consumption and cost statistics."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
-
-        # Start with 100 kWh and 50 EUR
-        last_consumption = 100.0
-        last_cost = 50.0
-
-        consumption_stats, cost_stats = (
-            manager._build_statistics_from_intervals(
-                mock_hourly_series, last_consumption, last_cost
-            )
-        )
-
-        # Should have 3 hourly entries for both
-        assert len(consumption_stats) == 3
-        assert len(cost_stats) == 3
-
-        # Consumption: 3 hours × 2.0 kWh = 6.0 kWh total
-        assert consumption_stats[-1]["sum"] == 106.0
-
-        # Cost: 3 hours × (2.0 kWh × 5.00 EUR/kWh) = 30.0 EUR total
-        assert cost_stats[-1]["sum"] == 80.0
-
-        # Verify timestamps match across both
-        for i in range(3):
-            assert consumption_stats[i]["start"] == cost_stats[i]["start"]
-
-    def test_build_statistics_handles_missing_data(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Test handling of missing data (None values)."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
-
-        helsinki_tz = ZoneInfo("Europe/Helsinki")
-        base_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=helsinki_tz)
-
-        series = [
-            Mock(
-                start=base_time.isoformat(),
-                stop=(base_time + timedelta(hours=1)).isoformat(),
-                electricity=0.5,
-                electricity_spot_prices_vat=500.0,
-            ),
-            Mock(
-                start=(base_time + timedelta(hours=1)).isoformat(),
-                stop=(base_time + timedelta(hours=2)).isoformat(),
-                electricity=None,  # Missing data
-                electricity_spot_prices_vat=500.0,
-            ),
-            Mock(
-                start=(base_time + timedelta(hours=2)).isoformat(),
-                stop=(base_time + timedelta(hours=3)).isoformat(),
-                electricity=0.5,
-                electricity_spot_prices_vat=500.0,
-            ),
-        ]
-
-        consumption_stats, cost_stats = (
-            manager._build_statistics_from_intervals(series, 0.0, 0.0)
-        )
-
-        # Should have 2 hourly statistics entries (skipped the None entry)
-        assert len(consumption_stats) == 2
-
-        # Cumulative should skip None and sum valid entries: 0.5 + 0.5 = 1.0
-        assert consumption_stats[-1]["sum"] == 1.0
-
-    def test_build_statistics_filters_future_data(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Test filtering of future data (critical - API returns predictions)."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
-
-        helsinki_tz = ZoneInfo("Europe/Helsinki")
-
-        # Create series with past and future data (rounded to hourly)
-        now = datetime.now(helsinki_tz)
-        past_time = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)
-        future_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(
-            hours=1
-        )
-
-        series = [
-            Mock(
-                start=past_time.isoformat(),
-                stop=(past_time + timedelta(hours=1)).isoformat(),
-                electricity=0.5,
-                electricity_spot_prices_vat=500.0,
-            ),
-            Mock(
-                start=future_time.isoformat(),  # Future data - should be filtered
-                stop=(future_time + timedelta(hours=1)).isoformat(),
-                electricity=0.5,
-                electricity_spot_prices_vat=500.0,
-            ),
-            Mock(
-                start=(future_time + timedelta(hours=1)).isoformat(),  # Also future
-                stop=(future_time + timedelta(hours=2)).isoformat(),
-                electricity=0.5,
-                electricity_spot_prices_vat=500.0,
-            ),
-        ]
-
-        consumption_stats, cost_stats = (
-            manager._build_statistics_from_intervals(series, 0.0, 0.0)
-        )
-
-        # Should have only 1 statistics entry (filtered out 2 future entries)
-        assert len(consumption_stats) == 1
-
-        # Cumulative should only include past data
-        assert consumption_stats[-1]["sum"] == 0.5
-
-    def test_build_statistics_timezone_handling(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Test proper timezone conversion in statistics."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
-
-        helsinki_tz = ZoneInfo("Europe/Helsinki")
-        helsinki_time = datetime(2024, 1, 15, 12, 0, 0, tzinfo=helsinki_tz)
-
-        series = [
-            Mock(
-                start=helsinki_time.isoformat(),
-                stop=(helsinki_time + timedelta(hours=1)).isoformat(),
-                electricity=0.5,
-                electricity_spot_prices_vat=500.0,
-            )
-        ]
-
-        consumption_stats, cost_stats = (
-            manager._build_statistics_from_intervals(series, 0.0, 0.0)
-        )
-
-        # Verify the timestamp is in UTC
-        assert consumption_stats[0]["start"].tzinfo == ZoneInfo("UTC")
-
-        # Helsinki noon in winter (UTC+2) should be 10:00 UTC
-        assert consumption_stats[0]["start"].hour == 10
-
-    def test_build_statistics_skips_data_before_last_timestamp(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Test that statistics import skips data at or before last known timestamp."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
-
-        helsinki_tz = ZoneInfo("Europe/Helsinki")
-        base_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=helsinki_tz)
-
-        # Create 3 hourly entries
-        series = [
-            Mock(
-                start=base_time.isoformat(),
-                stop=(base_time + timedelta(hours=1)).isoformat(),
-                electricity=1.0,
-                electricity_spot_prices_vat=500.0,
-            ),
-            Mock(
-                start=(base_time + timedelta(hours=1)).isoformat(),
-                stop=(base_time + timedelta(hours=2)).isoformat(),
-                electricity=2.0,
-                electricity_spot_prices_vat=500.0,
-            ),
-            Mock(
-                start=(base_time + timedelta(hours=2)).isoformat(),
-                stop=(base_time + timedelta(hours=3)).isoformat(),
-                electricity=3.0,
-                electricity_spot_prices_vat=500.0,
-            ),
-        ]
-
-        # Set last_timestamp to first hour (in UTC)
-        last_timestamp = base_time.astimezone(ZoneInfo("UTC")).replace(
-            minute=0, second=0, microsecond=0
-        )
-
-        consumption_stats, cost_stats = (
-            manager._build_statistics_from_intervals(
-                series, 100.0, 50.0, last_timestamp
-            )
-        )
-
-        # Should only import hours 2 and 3 (skipped hour 1 at last_timestamp)
-        assert len(consumption_stats) == 2
-
-        # First imported stat should be for hour 2 (electricity=2.0)
-        # Starting from cumulative of 100.0
-        assert consumption_stats[0]["sum"] == 102.0
-
-        # Second imported stat should be for hour 3 (electricity=3.0)
-        assert consumption_stats[1]["sum"] == 105.0
-
     async def test_fetch_interval_data(
         self, hass: HomeAssistant, mock_api_client, mock_measurement_response
     ):
@@ -394,182 +131,6 @@ class TestHelenStatisticsManager:
         # Verify we got the series data (3 hourly entries)
         assert len(series) == 3
         assert series[0].electricity == 2.0
-
-    async def test_get_last_cumulative_total_no_existing_stats(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Test getting last cumulative total when no statistics exist."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
-
-        # Mock get_instance and get_last_statistics to return empty result
-        mock_instance = Mock()
-        mock_instance.async_add_executor_job.return_value = {}
-
-        with patch(
-            "custom_components.helen_energy.statistics.get_instance",
-            return_value=mock_instance,
-        ):
-            last_cumulative, last_timestamp = await manager._get_last_cumulative_total(
-                manager.consumption_statistic_id
-            )
-
-        # Should return 0.0 and None when no statistics exist
-        assert last_cumulative == 0.0
-        assert last_timestamp is None
-
-    async def test_get_last_cumulative_total_with_existing_stats(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Test getting last cumulative total from existing statistics."""
-        manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.helen_monthly_consumption", "test_entry_12345678", "Helen Energy (test)"
-        )
-
-        # Create async mock - return stats with the new statistic_id format
-        test_timestamp = datetime(2024, 5, 15, 10, 0, 0, tzinfo=ZoneInfo("UTC"))
-
-        async def async_get_stats(*args, **kwargs):
-            return {
-                "helen_energy:hourly_energy_consumption_test_ent": [
-                    {"sum": 1234.56, "start": test_timestamp}
-                ]
-            }
-
-        # Mock get_instance and get_last_statistics to return existing stat
-        mock_instance = Mock()
-        mock_instance.async_add_executor_job = Mock(side_effect=async_get_stats)
-
-        with patch(
-            "custom_components.helen_energy.statistics.get_instance",
-            return_value=mock_instance,
-        ):
-            last_cumulative, last_timestamp = await manager._get_last_cumulative_total(
-                manager.consumption_statistic_id
-            )
-
-        # Should return the last sum value and timestamp
-        assert last_cumulative == 1234.56
-        assert last_timestamp == test_timestamp
-
-    async def test_import_consumption_statistics_metadata(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Test that consumption statistics import uses correct metadata."""
-        manager = HelenStatisticsManager(
-            hass,
-            mock_api_client,
-            "sensor.helen_monthly_consumption",
-            "test_entry_12345678",
-            "Helen Energy (test)",
-        )
-
-        test_statistics = [
-            {
-                "start": datetime(2024, 5, 15, 10, 0, 0, tzinfo=ZoneInfo("UTC")),
-                "state": 100.0,
-                "sum": 100.0,
-            }
-        ]
-
-        # Mock async_add_external_statistics
-        with patch(
-            "custom_components.helen_energy.statistics.async_add_external_statistics"
-        ) as mock_import:
-            await manager._import_consumption_statistics(test_statistics)
-
-            # Verify async_add_external_statistics was called
-            assert mock_import.called
-            call_args = mock_import.call_args
-
-            # Verify metadata (dict or object depending on HA version)
-            metadata = call_args[0][1]  # Second argument is metadata
-
-            # Check if StatisticMeanType is available
-            try:
-                from homeassistant.components.recorder.models import StatisticMeanType
-
-                has_mean_type = True
-            except ImportError:
-                has_mean_type = False
-
-            if isinstance(metadata, dict):
-                assert metadata["has_sum"] is True
-                assert metadata["name"] == "Helen Energy (test) - Consumption"
-                assert metadata["source"] == "helen_energy"
-                assert metadata["statistic_id"] == "helen_energy:hourly_energy_consumption_test_ent"
-                assert metadata["unit_of_measurement"] == UnitOfEnergy.KILO_WATT_HOUR
-                assert metadata["unit_class"] == "energy"
-
-                # Version-aware mean type checking
-                if has_mean_type:
-                    assert metadata.get("mean_type") == StatisticMeanType.NONE
-                else:
-                    assert metadata["has_mean"] is False
-            else:
-                assert metadata.has_sum is True
-                assert metadata.name == "Helen Energy (test) - Consumption"
-                assert metadata.source == "helen_energy"
-                assert metadata.statistic_id == "helen_energy:hourly_energy_consumption_test_ent"
-                assert metadata.unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
-                assert metadata.unit_class == "energy"
-
-                # Version-aware mean type checking
-                if has_mean_type:
-                    assert metadata.mean_type == StatisticMeanType.NONE
-                else:
-                    assert metadata.has_mean is False
-
-            # Verify statistics data
-            statistics_arg = call_args[0][2]  # Third argument is statistics list
-            assert statistics_arg == test_statistics
-
-    async def test_import_cost_statistics_metadata(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Test that cost statistics import uses correct metadata."""
-        manager = HelenStatisticsManager(
-            hass,
-            mock_api_client,
-            "sensor.helen_monthly_consumption",
-            "test_entry_12345678",
-            "Helen Energy (test)",
-        )
-
-        test_statistics = [
-            {
-                "start": datetime(2024, 5, 15, 10, 0, 0, tzinfo=ZoneInfo("UTC")),
-                "state": 50.0,
-                "sum": 50.0,
-            }
-        ]
-
-        # Mock async_add_external_statistics
-        with patch(
-            "custom_components.helen_energy.statistics.async_add_external_statistics"
-        ) as mock_import:
-            await manager._import_cost_statistics(test_statistics)
-
-            # Verify async_add_external_statistics was called
-            assert mock_import.called
-            call_args = mock_import.call_args
-
-            # Verify metadata (dict or object depending on HA version)
-            metadata = call_args[0][1]  # Second argument is metadata
-
-            if isinstance(metadata, dict):
-                assert metadata["name"] == "Helen Energy (test) - Spot Prices"
-                assert metadata["statistic_id"] == "helen_energy:hourly_cost_spot_test_ent"
-                assert metadata["unit_of_measurement"] == "EUR"
-                assert metadata["unit_class"] is None
-            else:
-                assert metadata.name == "Helen Energy (test) - Spot Prices"
-                assert metadata.statistic_id == "helen_energy:hourly_cost_spot_test_ent"
-                assert metadata.unit_of_measurement == "EUR"
-                assert metadata.unit_class is None
-
-            # Verify statistics data
-            statistics_arg = call_args[0][2]  # Third argument is statistics list
-            assert statistics_arg == test_statistics
 
     async def test_get_existing_statistics_in_window(
         self, hass: HomeAssistant, mock_api_client
@@ -924,51 +485,133 @@ class TestHelenStatisticsManager:
         # Fixed cost: 10.15 + (2.0 * 0.10) = 10.35 EUR
         assert fixed_cost_stats[1]["sum"] == 10.35
 
-    async def test_import_fixed_cost_statistics_metadata(
+    async def test_import_statistics_metadata(
         self, hass: HomeAssistant, mock_api_client
     ):
-        """Test that fixed cost statistics import uses correct metadata."""
+        """Test that _import_statistics builds correct metadata."""
         manager = HelenStatisticsManager(
             hass,
             mock_api_client,
             "sensor.helen_monthly_consumption",
             "test_entry_12345678",
             "Helen Energy (test)",
-            fixed_unit_price=10.0,
         )
 
         test_statistics = [
             {
                 "start": datetime(2024, 5, 15, 10, 0, 0, tzinfo=ZoneInfo("UTC")),
-                "state": 50.0,
-                "sum": 50.0,
+                "state": 100.0,
+                "sum": 100.0,
             }
         ]
 
-        # Mock async_add_external_statistics
         with patch(
             "custom_components.helen_energy.statistics.async_add_external_statistics"
         ) as mock_import:
-            await manager._import_fixed_cost_statistics(test_statistics)
+            await manager._import_statistics(
+                manager.consumption_statistic_id,
+                "Helen Energy (test) - Consumption",
+                UnitOfEnergy.KILO_WATT_HOUR,
+                "energy",
+                test_statistics,
+            )
 
-            # Verify async_add_external_statistics was called
-            assert mock_import.called
-            call_args = mock_import.call_args
+        assert mock_import.called
+        metadata = mock_import.call_args[0][1]
 
-            # Verify metadata (dict or object depending on HA version)
-            metadata = call_args[0][1]  # Second argument is metadata
+        try:
+            from homeassistant.components.recorder.models import StatisticMeanType
 
-            if isinstance(metadata, dict):
-                assert metadata["name"] == "Helen Energy (test) - Fixed Prices"
-                assert metadata["statistic_id"] == "helen_energy:hourly_cost_fixed_test_ent"
-                assert metadata["unit_of_measurement"] == "EUR"
-                assert metadata["unit_class"] is None
-            else:
-                assert metadata.name == "Helen Energy (test) - Fixed Prices"
-                assert metadata.statistic_id == "helen_energy:hourly_cost_fixed_test_ent"
-                assert metadata.unit_of_measurement == "EUR"
-                assert metadata.unit_class is None
+            has_mean_type = True
+        except ImportError:
+            has_mean_type = False
 
-            # Verify statistics data
-            statistics_arg = call_args[0][2]  # Third argument is statistics list
-            assert statistics_arg == test_statistics
+        def field(meta, key):
+            return meta[key] if isinstance(meta, dict) else getattr(meta, key)
+
+        assert field(metadata, "has_sum") is True
+        assert field(metadata, "name") == "Helen Energy (test) - Consumption"
+        assert field(metadata, "source") == "helen_energy"
+        assert field(metadata, "statistic_id") == manager.consumption_statistic_id
+        assert field(metadata, "unit_of_measurement") == UnitOfEnergy.KILO_WATT_HOUR
+        assert field(metadata, "unit_class") == "energy"
+        if has_mean_type:
+            assert field(metadata, "mean_type") == StatisticMeanType.NONE
+        else:
+            assert field(metadata, "has_mean") is False
+
+        assert mock_import.call_args[0][2] == test_statistics
+
+    async def test_fill_gaps_imports_all_three_streams(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """End-to-end: _fill_gaps detects gaps and imports all three streams."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+            fixed_unit_price=10.0,  # 10 cents/kWh -> 0.10 EUR/kWh
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        base_time = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
+        series = [
+            Mock(
+                start=(base_time + timedelta(hours=i)).isoformat(),
+                stop=(base_time + timedelta(hours=i + 1)).isoformat(),
+                electricity=2.0,
+                electricity_spot_prices_vat=500.0,  # 5.00 EUR/kWh
+            )
+            for i in range(2)
+        ]
+
+        async def no_existing(statistic_id, start, end):
+            return {}
+
+        async def zero_cumulative(statistic_id, timestamp):
+            return 0.0, None
+
+        with (
+            patch.object(
+                manager, "_get_existing_statistics_in_window", side_effect=no_existing
+            ),
+            patch.object(
+                manager,
+                "_get_cumulative_at_or_before_timestamp",
+                side_effect=zero_cumulative,
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._fill_gaps(series)
+
+        # Three streams imported: consumption, spot cost, fixed cost
+        assert mock_import.call_count == 3
+
+        def stream(statistic_id):
+            for call in mock_import.call_args_list:
+                meta = call[0][1]
+                sid = meta["statistic_id"] if isinstance(meta, dict) else meta.statistic_id
+                if sid == statistic_id:
+                    return meta, call[0][2]
+            raise AssertionError(f"No import for {statistic_id}")
+
+        def field(meta, key):
+            return meta[key] if isinstance(meta, dict) else getattr(meta, key)
+
+        cons_meta, cons_stats = stream(manager.consumption_statistic_id)
+        assert field(cons_meta, "unit_of_measurement") == UnitOfEnergy.KILO_WATT_HOUR
+        assert field(cons_meta, "unit_class") == "energy"
+        assert [s["sum"] for s in cons_stats] == [2.0, 4.0]
+
+        spot_meta, spot_stats = stream(manager.cost_statistic_id)
+        assert field(spot_meta, "unit_of_measurement") == "EUR"
+        assert field(spot_meta, "unit_class") is None
+        assert [s["sum"] for s in spot_stats] == [10.0, 20.0]
+
+        fixed_meta, fixed_stats = stream(manager.fixed_cost_statistic_id)
+        assert field(fixed_meta, "unit_of_measurement") == "EUR"
+        assert [s["sum"] for s in fixed_stats] == [0.2, 0.4]

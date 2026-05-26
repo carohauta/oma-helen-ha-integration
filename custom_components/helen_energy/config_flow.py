@@ -41,7 +41,7 @@ _LOGGER = logging.getLogger(__name__)
 class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Helen Energy."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -180,6 +180,22 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.hass.async_add_executor_job(self.api_client.close)
             self.api_client = None
 
+    async def _log_contract_data_debug(self, step_name: str) -> None:
+        """Log raw contract data during a config-flow step when debug is enabled."""
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        try:
+            contract_data_json = await self.hass.async_add_executor_job(
+                self.api_client.get_contract_data_json
+            )
+            _LOGGER.debug(
+                "Contract data JSON during %s: %s", step_name, contract_data_json
+            )
+        except Exception as debug_err:
+            _LOGGER.debug(
+                "Failed to get contract data JSON during %s: %s", step_name, debug_err
+            )
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -194,20 +210,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input["username"], user_input["password"]
                 )
 
-                # Debug logging: Log contract data when debug logging is enabled
-                if _LOGGER.isEnabledFor(logging.DEBUG):
-                    try:
-                        contract_data_json = await self.hass.async_add_executor_job(
-                            self.api_client.get_contract_data_json
-                        )
-                        _LOGGER.debug(
-                            "Contract data JSON during setup: %s", contract_data_json
-                        )
-                    except (AttributeError, Exception) as debug_err:
-                        _LOGGER.debug(
-                            "Failed to get contract data JSON during setup: %s",
-                            debug_err,
-                        )
+                await self._log_contract_data_debug("setup")
 
                 # Validate delivery site if provided
                 if "delivery_site_id" in user_input:
@@ -345,20 +348,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     entry.data[CONF_USERNAME], user_input["password"]
                 )
 
-                # Debug logging: Log contract data when debug logging is enabled
-                if _LOGGER.isEnabledFor(logging.DEBUG):
-                    try:
-                        contract_data_json = await self.hass.async_add_executor_job(
-                            self.api_client.get_contract_data_json
-                        )
-                        _LOGGER.debug(
-                            "Contract data JSON during reauth: %s", contract_data_json
-                        )
-                    except (AttributeError, Exception) as debug_err:
-                        _LOGGER.debug(
-                            "Failed to get contract data JSON during reauth: %s",
-                            debug_err,
-                        )
+                await self._log_contract_data_debug("reauth")
 
                 # Update entry with new password
                 new_data = dict(entry.data)
@@ -406,20 +396,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
             )
 
-            # Debug logging: Log contract data when debug logging is enabled
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                try:
-                    contract_data_json = await self.hass.async_add_executor_job(
-                        self.api_client.get_contract_data_json
-                    )
-                    _LOGGER.debug(
-                        "Contract data JSON during YAML import: %s", contract_data_json
-                    )
-                except (AttributeError, Exception) as debug_err:
-                    _LOGGER.debug(
-                        "Failed to get contract data JSON during YAML import: %s",
-                        debug_err,
-                    )
+            await self._log_contract_data_debug("YAML import")
 
             # Map legacy contract_type to our new contract type selection
             legacy_contract_type = user_input.get("contract_type", "").upper()

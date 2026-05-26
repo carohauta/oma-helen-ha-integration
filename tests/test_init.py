@@ -2,6 +2,8 @@
 
 import pytest
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.helen_energy import CONFIG_SCHEMA
 from custom_components.helen_energy.const import (
@@ -164,3 +166,34 @@ class TestConfigSchema:
         assert isinstance(result[DOMAIN]["default_base_price"], float)
         assert result[DOMAIN]["default_base_price"] == 5.0
         # Note: Boolean coercion might not work as expected with string inputs
+
+
+class TestEntryMigration:
+    """Test config entry version migration on setup."""
+
+    async def test_v1_entry_migrates_to_v2(
+        self, hass: HomeAssistant, mock_api_setup
+    ):
+        """A version-1 entry is migrated to version 2 during setup.
+
+        Guards against the inverted version gate that previously skipped
+        migration for v1 entries.
+        """
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            version=1,
+            title="Helen Energy (testuser)",
+            data={
+                CONF_USERNAME: "testuser",
+                CONF_PASSWORD: "testpass",
+                CONF_VAT: 25.5,
+            },
+            unique_id="testuser_legacy",
+        )
+        entry.add_to_hass(hass)
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        assert entry.version == 2
+        # Migration backfills the previously-missing default
+        assert entry.data.get(CONF_INCLUDE_TRANSFER_COSTS) is False

@@ -87,11 +87,6 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Helen Energy from a config entry."""
-    if entry.version != 1:
-        # Perform migration if needed
-        if not await async_migrate_entry(hass, entry):
-            return False
-
     from .sensor import HelenDataCoordinator
 
     vat = entry.data[CONF_VAT] / 100

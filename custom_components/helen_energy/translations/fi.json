@@ -38,7 +38,10 @@
     },
     "abort": {
       "already_configured": "Tili on jo määritetty",
-      "reauth_successful": "Uudelleentunnistautuminen onnistui"
+      "reauth_successful": "Uudelleentunnistautuminen onnistui",
+      "reauth_failed": "Uudelleentunnistautuminen epäonnistui. Yritä uudelleen.",
+      "invalid_auth": "Virheellinen käyttäjätunnus tai salasana. Tarkista tunnukset ja yritä uudelleen.",
+      "unknown": "Odottamaton virhe tapahtui. Tarkista lokit saadaksesi lisätietoja."
     }
   },
   "selector": {

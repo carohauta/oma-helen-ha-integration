@@ -5,7 +5,6 @@ from unittest.mock import Mock, patch
 from custom_components.helen_energy.migration import (
     LEGACY_ENTITY_MAPPINGS,
     get_legacy_entity_name,
-    should_preserve_legacy_entity_id,
     should_use_legacy_names,
 )
 
@@ -37,18 +36,6 @@ class TestMigrationUtilities:
         """Test getting legacy entity name for unknown sensor type."""
         result = get_legacy_entity_name("unknown_sensor_type")
         assert result == "Helen Unknown Sensor Type"
-
-    def test_should_preserve_legacy_entity_id_known_types(self):
-        """Test should preserve legacy entity ID for known types."""
-        assert should_preserve_legacy_entity_id("market_price_electricity") is True
-        assert should_preserve_legacy_entity_id("exchange_electricity") is True
-        assert should_preserve_legacy_entity_id("fixed_price_electricity") is True
-        assert should_preserve_legacy_entity_id("transfer_costs") is True
-        assert should_preserve_legacy_entity_id("monthly_consumption") is True
-
-    def test_should_preserve_legacy_entity_id_unknown_type(self):
-        """Test should preserve legacy entity ID for unknown type."""
-        assert should_preserve_legacy_entity_id("unknown_type") is False
 
     def test_should_use_legacy_names_first_entry_with_legacy_entities(self):
         """Test should use legacy names for first entry with legacy entities."""

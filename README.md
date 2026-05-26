@@ -13,7 +13,7 @@ The integration works with the following contract types:
 - Market Price Electricity https://www.helen.fi/en/electricity/electricity-products-and-prices/marketpriceelectricity
 - Fixed Price Electricity https://www.helen.fi/en/electricity/electricity-products-and-prices/fixed-price-basic-electricity
 
-Requires HA Core version 2022.7.0 or newer
+Tested against HA Core 2025.1 (the version pinned by the test suite). Older HA versions may work but are not verified.
 
 ### How to install
 

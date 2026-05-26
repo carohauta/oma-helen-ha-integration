@@ -4,38 +4,32 @@ This file provides detailed guidance for AI coding agents when working with code
 
 ## Project Overview
 
-Home Assistant custom integration for Helen Energy electricity service (Finland). Fetches electricity consumption, pricing, and costs from the Oma Helen API. Supports Exchange (spot), Market Price, and Fixed Price electricity contracts.
+Home Assistant custom integration for Helen Energy electricity service (Finland). Fetches electricity consumption, pricing, and costs from the Oma Helen API. Supports Exchange (spot), Market Price, Fixed Price, and Smart Guarantee (VALTTI) electricity contracts.
 
 Key features:
 - Config flow UI for setup (legacy YAML migration supported)
 - Multiple contract types with automatic detection
-- Statistics import for HA Energy Dashboard (72-hour backfill)
+- Statistics import for HA Energy Dashboard (72-hour backfill with gap detection)
 - Transfer costs tracking (optional)
 - Entity ID migration for backward compatibility
 
 ## Development Commands
 
+### Setup
+```bash
+uv sync
+```
+
 ### Testing
 ```bash
-# Run all tests with coverage (preferred - uses uv)
+# Run all tests (coverage flags live in pytest.ini)
 uv run pytest tests/
 
-# Run all tests (fallback)
-make test
-
-# Run specific test file
-make test-file FILE=test_statistics.py
-# or directly:
+# Run a specific test file
 uv run pytest tests/test_statistics.py -v
 
-# Run with coverage report
-make test-cov
-
-# Open coverage HTML report (macOS)
-make test-cov-open
-
 # Debug mode (drops into pdb on failure)
-make test-debug
+uv run pytest tests/ -v --pdb
 ```
 
 ### Linting & Validation
@@ -48,7 +42,8 @@ make test-debug
 
 ### Clean Build Artifacts
 ```bash
-make clean
+rm -rf .pytest_cache htmlcov .coverage coverage.xml
+find . -type d -name __pycache__ -exec rm -rf {} +
 ```
 
 ## Architecture Overview
@@ -73,23 +68,26 @@ make clean
   - Fetches consumption/pricing data from Helen API
   - Handles authentication errors (triggers reauth flow)
   - Optionally imports statistics via `HelenStatisticsManager`
+  - Dynamically updates `_fixed_unit_price` from API if not user-configured (priority: user config > API contract price)
 - **Sensor entities** (contract-type specific):
-  - `HelenExchangeElectricitySensor` - Exchange (spot) pricing
-  - `HelenMarketPriceElectricitySensor` - Market price
-  - `HelenFixedPriceElectricitySensor` - Fixed price
-  - `HelenTransferCostsSensor` - Transfer/delivery costs (optional)
-  - `HelenMonthlyConsumptionSensor` - Energy Dashboard integration
+  - `HelenExchangeElectricity` - Exchange (spot) pricing
+  - `HelenMarketPriceElectricity` - Market price
+  - `HelenFixedPriceElectricity` - Fixed price
+  - `HelenSmartGuarantee` - Smart guarantee / VALTTI contract
+  - `HelenTransferPrice` - Transfer/delivery costs (optional)
+  - `HelenMonthlyConsumption` - Energy Dashboard integration
 
 **`statistics.py`** - External statistics manager
-- **`HelenStatisticsManager`**: Imports hourly statistics to HA database
-  - Creates 2 statistic types for Energy Dashboard:
+- **`HelenStatisticsManager`**: Imports hourly statistics to HA database via gap detection
+  - Creates up to 3 statistic streams for Energy Dashboard:
     - `helen_energy:hourly_energy_consumption` (cumulative kWh)
-    - `helen_energy:hourly_cost` (cumulative EUR)
+    - `helen_energy:hourly_cost_spot` (cumulative EUR, spot/exchange price)
+    - `helen_energy:hourly_cost_fixed` (cumulative EUR, fixed unit price — only when `fixed_unit_price` is set)
   - Fetches 15-minute resolution data from API (`RESOLUTION_QUARTER`)
   - Aggregates 15-min intervals to hourly for precise pricing
   - Backfills last 72 hours (hard-coded in `STATISTICS_BACKFILL_HOURS`)
-  - Filters out future data (API returns predictions)
-  - **Filters out already-imported data** by timestamp to prevent duplicates
+  - **Gap detection**: queries existing statistics in the window and only imports missing timestamps
+  - **Pending data distinction**: missing API data (`electricity=None`) treated as pending, not as a fillable gap
   - Handles timezone conversion (Helsinki → UTC)
   - **Critical**: All timestamps normalized to UTC with microseconds stripped
   - Rounding: 2 decimals for consumption (kWh), 4 decimals for prices (EUR/kWh)
@@ -121,24 +119,31 @@ make clean
    - Fetch consumption data (current/last month)
    - Fetch pricing data (contract-type specific)
    - Update sensor states and attributes
+   - Update `_fixed_unit_price` from API if not user-configured
    - Import statistics (if enabled)
-3. **Statistics import**:
+3. **Statistics import** (gap-detection approach):
    - Fetch 15-minute intervals (72h backfill, `RESOLUTION_QUARTER`)
    - Aggregate to hourly: sum consumption, average spot prices
-   - Query last imported timestamp from HA statistics
-   - Skip already-imported data (timestamp <= last_timestamp)
-   - Build cumulative consumption/cost starting from last known values
-   - Write to HA statistics database via `async_add_external_statistics`
+   - Query all existing records in the backfill window from HA statistics
+   - Detect gaps: hourly timestamps present in API data but absent in HA
+   - Skip entries with `electricity=None` (pending, not gaps)
+   - For each gap: query cumulative sum just before it, build forward
+   - Chain consecutive gaps without extra DB queries
+   - Write gap-filling data via `async_add_external_statistics`
 
 ### Statistics Manager Implementation Details
 
+**`HelenStatisticsManager` Constructor**:
+- `fixed_unit_price: float | None` — fixed unit price in cents/kWh; enables `hourly_cost_fixed` stream when set
+
 **`HelenStatisticsManager` Key Methods**:
 
-1. **`import_recent_statistics()`** - Main entry point
+1. **`import_recent_statistics()`** - Main entry point (gap-detection based)
    - Fetches 15-minute data via `_fetch_interval_data()`
-   - Queries last cumulative values and timestamps
-   - Builds statistics with `_build_statistics_from_intervals()`
-   - Imports via `_import_consumption_statistics()` and `_import_cost_statistics()`
+   - Queries all existing records in the backfill window via `_get_existing_statistics_in_window()`
+   - Finds missing timestamps via `_detect_gaps()`
+   - Builds statistics for gaps only via `_build_statistics_for_gaps()`
+   - Imports via `_import_consumption_statistics()`, `_import_cost_statistics()`, and optionally `_import_fixed_cost_statistics()`
 
 2. **`_fetch_interval_data()`** - Data retrieval
    - Calculates date range from `STATISTICS_BACKFILL_HOURS` constant
@@ -155,40 +160,64 @@ make clean
    - **Critical**: Uses UTC for hour_key to prevent duplicate entries
    - Includes deduplication safety check
 
-4. **`_build_statistics_from_intervals()`** - Cumulative calculation
-   - Takes `last_timestamp` parameter to filter already-imported data
-   - Skips intervals where `utc_time <= last_timestamp`
-   - Normalizes timestamps: strips microseconds
-   - Filters out future data (API predictions)
-   - Builds cumulative consumption and cost from last known values
-   - Returns `StatisticData` dicts with `start`, `state`, `sum` fields
+4. **`_get_existing_statistics_in_window()`** - Query existing records in a time window
+   - Uses `statistics_during_period()` to fetch all records between two timestamps
+   - Returns `dict[datetime, float]` mapping normalized UTC timestamps to cumulative sums
+   - Used by gap detection to know which hours are already populated
 
-5. **`_get_last_cumulative_total()`** - Query existing statistics
-   - Queries HA's recorder for last statistic entry
+5. **`_detect_gaps()`** - Find missing timestamps
+   - Compares API hourly series against existing statistics timestamps
+   - Returns only entries where the timestamp is absent AND `electricity` is not None
+   - Entries with `electricity=None` are treated as pending (not yet available), not gaps
+
+6. **`_build_statistics_for_gaps()`** - Cumulative calculation for gap filling
+   - For each gap entry, queries the cumulative value just before it via `_get_cumulative_at_or_before_timestamp()`
+   - Consecutive gaps (hourly sequence) chain from the previous entry without a DB query
+   - Non-consecutive gaps each trigger a fresh DB query
+   - Returns tuple of `(consumption_stats, cost_stats, fixed_cost_stats)`
+   - `fixed_cost_stats` is empty list when `fixed_unit_price` is None
+
+7. **`_get_cumulative_at_or_before_timestamp()`** - Point-in-time cumulative lookup
+   - Queries `statistics_during_period` from epoch to the given timestamp
+   - Returns the last record's sum and timestamp as `(float, datetime | None)`
+   - Used when a gap is non-consecutive (can't chain from previous gap's cumulative)
+
+8. **`_get_last_cumulative_total()`** - Legacy helper (still used by tests)
+   - Queries HA's recorder for the most recent statistic entry
    - Handles both Unix timestamp (float) and datetime objects
    - Returns tuple of `(cumulative_value, timestamp)`
-   - Used to continue cumulative series and filter duplicates
+
+9. **`_build_statistics_from_intervals()`** - Legacy method (kept but not called by `import_recent_statistics`)
+   - Takes `last_timestamp` to skip already-imported data
+   - Still used in some tests that bypass the new gap-detection flow
 
 ### Testing Considerations
 
 - Uses `pytest-homeassistant-custom-component==0.13.205`
 - Async tests use `asyncio_mode = auto`
 - Mocking: Mock `HelenApiClient` and `HelenPriceClient` responses
-- Statistics tests: Mock `get_last_statistics` and `async_add_external_statistics`
+- Statistics tests: Mock `get_instance`, `statistics_during_period`, `get_last_statistics`, and `async_add_external_statistics`
 - Config flow tests: Test unique ID generation, entry data building
 - All tests must handle timezone conversions properly (Helsinki/UTC)
-- **Test fixtures**:
-  - `mock_measurement_series`: 15-minute intervals (12 quarters = 3 hours)
-  - `mock_hourly_series`: Hourly intervals (for direct `_build_statistics_from_intervals` tests)
+- **Test fixtures** (`tests/test_statistics.py`):
+  - `mock_measurement_series`: 15-minute intervals (12 quarters = 3 hours, 0.5 kWh each, 500 cents/kWh)
+  - `mock_hourly_series`: Hourly intervals (3 hours, 2.0 kWh each, 500 cents/kWh) for direct `_build_statistics_from_intervals` tests
+  - `mock_measurement_response`: Wraps `mock_measurement_series` in a mock API response object
   - Tests calling aggregation use `mock_measurement_series`
   - Tests bypassing aggregation use `mock_hourly_series`
+- **Gap detection tests**: Mock `_get_cumulative_at_or_before_timestamp` to control cumulative starting values; verify call count to confirm consecutive vs non-consecutive chaining
 
 ### Important Implementation Details
 
+**Statistics Streams**:
+- `hourly_energy_consumption` — always present; cumulative kWh
+- `hourly_cost_spot` — always present; cumulative EUR based on spot price
+- `hourly_cost_fixed` — only created when `fixed_unit_price` is set on `HelenStatisticsManager`; cumulative EUR at fixed rate
+
 **Statistics Format**:
-- Cumulative statistics (consumption, cost): Include both `state` and `sum` fields
-- Both fields set to the SAME cumulative value for consistency
-- Metadata `has_sum=True` for cumulative statistics
+- Cumulative statistics: Include both `state` and `sum` fields set to the SAME cumulative value
+- Metadata `has_sum=True` for all three streams
+- Cost unit: `"EUR"` with `unit_class=None` (may need revisiting in HA 2026.11+)
 
 **15-Minute to Hourly Aggregation**:
 - API fetched with `RESOLUTION_QUARTER` (15-minute intervals)
@@ -198,13 +227,18 @@ make clean
 - Hours with != 4 quarters are skipped (incomplete data)
 - Rounding matches official Oma Helen app precision
 
-**Preventing Duplicate Statistics** (CRITICAL):
+**Preventing Duplicate Statistics** (CRITICAL — now via gap detection):
 - Timestamps MUST be normalized: `.replace(minute=0, second=0, microsecond=0)`
-- Query last imported timestamp from existing statistics
-- Skip intervals where `utc_time <= last_timestamp` to prevent re-imports
-- Without this, cumulative values grow on every HA restart
+- Query existing statistics across the full 72-hour window using `statistics_during_period`
+- Only write records for timestamps missing from existing statistics
+- Gap detection replaces the old "skip timestamp <= last_known" approach
 - Hour keys during aggregation MUST use UTC to ensure consistency
 - Example bug: Different timezone formats ("+03:00" vs "Z") create duplicate hour_keys
+
+**Pending vs Gap distinction**:
+- API can return entries with `electricity=None` for recent hours (data not yet available)
+- `_detect_gaps()` treats `electricity=None` as pending, not as a fillable gap
+- Only timestamps with actual electricity data are counted as missing/gaps
 
 **Multiple Entries Support**:
 - Each entry gets unique ID: `{username}_{delivery_site_id}` or `{username}_{timestamp}`
@@ -225,8 +259,8 @@ make clean
 
 **Duplicate Statistics on Restart**:
 - **Symptom**: Cumulative values grow by ~89 kWh on every HA restart
-- **Root cause**: Re-importing already-imported data without timestamp filtering
-- **Fix**: Always pass `last_timestamp` and skip data where `utc_time <= last_timestamp`
+- **Root cause**: Re-importing already-imported data without gap detection
+- **Fix**: Use `_get_existing_statistics_in_window()` + `_detect_gaps()` to only import missing timestamps
 
 **Inconsistent Timestamps**:
 - **Symptom**: Multiple statistics entries for the same hour with different cumulative values

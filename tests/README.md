@@ -18,63 +18,54 @@ This directory contains comprehensive unit tests for the Helen Energy Home Assis
 
 Install test dependencies:
 ```bash
-pip install -r test-requirements.txt
+uv sync
 ```
 
-### Quick Commands (using Makefile)
+### Cleaning Up
 
 ```bash
-# Run all tests
-make test
-
-# Run tests with coverage report
-make test-cov
-
-# Run a specific test file
-make test-file FILE=tests/test_sensor.py
-
-# Run tests in debug mode (verbose output)
-make test-debug
+rm -rf .pytest_cache htmlcov .coverage coverage.xml
+find . -type d -name __pycache__ -exec rm -rf {} +
 ```
 
 ### Running All Tests
 ```bash
-pytest
+uv run pytest
 ```
 
 ### Running Specific Test Files
 ```bash
-pytest tests/test_sensor.py
-pytest tests/test_config_flow.py
+uv run pytest tests/test_sensor.py
+uv run pytest tests/test_config_flow.py
 ```
 
 ### Running with Coverage
 ```bash
-pytest --cov=custom_components.helen_energy --cov-report=html
+uv run pytest --cov=custom_components.helen_energy --cov-report=html
 ```
 
 ### Running Only Unit Tests
 ```bash
-pytest -m "not integration"
+uv run pytest -m "not integration"
 ```
 
 ### Manual pytest Commands
 
 ```bash
 # Run all tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run specific test files
-pytest tests/test_sensor.py -v
-pytest tests/test_config_flow.py -v
+uv run pytest tests/test_sensor.py -v
+uv run pytest tests/test_config_flow.py -v
 
 # Run with coverage report
-pytest tests/ --cov=custom_components.helen_energy --cov-report=html
-pytest tests/ --cov=custom_components.helen_energy --cov-report=xml
+uv run pytest tests/ --cov=custom_components.helen_energy --cov-report=html
+uv run pytest tests/ --cov=custom_components.helen_energy --cov-report=xml
 
 # Run tests matching a pattern
-pytest tests/ -k "sensor" -v
-pytest tests/ -k "config_flow" -v
+uv run pytest tests/ -k "sensor" -v
+uv run pytest tests/ -k "config_flow" -v
 ```
 
 ## Test Categories

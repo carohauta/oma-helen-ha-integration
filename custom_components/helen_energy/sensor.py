@@ -89,7 +89,6 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         credentials: dict[str, str],
         delivery_site_id: str | None = None,
         include_transfer_costs: bool = False,
-        enable_statistics_import: bool = True,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -105,46 +104,44 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         self.delivery_site_id = delivery_site_id
         self.include_transfer_costs = include_transfer_costs
 
-        # Initialize statistics manager if enabled
-        self.statistics_manager: HelenStatisticsManager | None = None
-        if enable_statistics_import:
-            # Generate entity_id for monthly consumption sensor
-            # For the first entry, use the standard entity ID
-            helen_entries = list(hass.config_entries.async_entries(DOMAIN))
-            is_first_entry = (
-                len(helen_entries) >= 1 and helen_entries[0] == config_entry
-            )
+        # Initialize statistics manager
+        # Generate entity_id for monthly consumption sensor
+        # For the first entry, use the standard entity ID
+        helen_entries = list(hass.config_entries.async_entries(DOMAIN))
+        is_first_entry = (
+            len(helen_entries) >= 1 and helen_entries[0] == config_entry
+        )
 
-            if is_first_entry:
-                entity_id = "sensor.helen_monthly_consumption"
-            else:
-                # For additional entries, construct entity_id with suffix
-                entry_index = next(
-                    (
-                        i
-                        for i, entry in enumerate(helen_entries)
-                        if entry == config_entry
-                    ),
-                    1,
-                )
-                entity_id = f"sensor.helen_monthly_consumption_{entry_index + 1}"
-
-            # Get user-configured fixed unit price (if any)
-            config_fixed_unit_price = config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)
-
-            self.statistics_manager = HelenStatisticsManager(
-                hass,
-                helen_api_client,
-                entity_id,
-                config_entry.entry_id,
-                config_entry.title,
-                fixed_unit_price=config_fixed_unit_price,
+        if is_first_entry:
+            entity_id = "sensor.helen_monthly_consumption"
+        else:
+            # For additional entries, construct entity_id with suffix
+            entry_index = next(
+                (
+                    i
+                    for i, entry in enumerate(helen_entries)
+                    if entry == config_entry
+                ),
+                1,
             )
-            _LOGGER.debug(
-                "Statistics manager initialized for %s (fixed_price=%s)",
-                entity_id,
-                f"{config_fixed_unit_price} cents/kWh" if config_fixed_unit_price else "from API",
-            )
+            entity_id = f"sensor.helen_monthly_consumption_{entry_index + 1}"
+
+        # Get user-configured fixed unit price (if any)
+        config_fixed_unit_price = config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)
+
+        self.statistics_manager = HelenStatisticsManager(
+            hass,
+            helen_api_client,
+            entity_id,
+            config_entry.entry_id,
+            config_entry.title,
+            fixed_unit_price=config_fixed_unit_price,
+        )
+        _LOGGER.debug(
+            "Statistics manager initialized for %s (fixed_price=%s)",
+            entity_id,
+            f"{config_fixed_unit_price} cents/kWh" if config_fixed_unit_price else "from API",
+        )
 
     async def _async_update_data(self):
         """Fetch data from Helen API."""

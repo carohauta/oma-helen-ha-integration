@@ -10,7 +10,6 @@ from custom_components.helen_energy.const import (
     CONF_DEFAULT_BASE_PRICE,
     CONF_DEFAULT_UNIT_PRICE,
     CONF_DELIVERY_SITE_ID,
-    CONF_ENABLE_STATISTICS_IMPORT,
     CONF_INCLUDE_TRANSFER_COSTS,
     CONF_VAT,
 )
@@ -55,9 +54,7 @@ class TestHelenConfigFlow:
         assert data[CONF_USERNAME] == "testuser"
         assert data[CONF_PASSWORD] == "testpass"
         assert data[CONF_VAT] == 25.5
-        # Statistics import is enabled by default
-        assert data[CONF_ENABLE_STATISTICS_IMPORT]
-        assert len(data) == 4  # Required fields + statistics enable flag
+        assert len(data) == 3  # Required fields only
 
     def test_build_entry_data_full(self):
         """Test building entry data with all optional fields."""

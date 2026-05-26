@@ -18,8 +18,7 @@ CONTRACT_TYPE_FIXED: Final = "fixed"
 CONTRACT_TYPE_MARKET: Final = "market"
 CONTRACT_TYPE_EXCHANGE: Final = "exchange"
 
-# Statistics import configuration
-CONF_ENABLE_STATISTICS_IMPORT: Final = "enable_statistics_import"
+# Statistics configuration
 STATISTICS_BACKFILL_HOURS: Final = 72  # Hard-coded, not user-configurable
 
 # Services

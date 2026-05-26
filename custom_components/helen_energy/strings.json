@@ -1,17 +1,12 @@
-    {
-        "config": {
-            "error": {
-                "automatic_detection_failed": "Could not automatically detect your contract type (detected: {detected_type}). Please select your contract type manually from the options below."
-            }
-        },
-        "selector": {
-            "contract_type": {
-                "options": {
-                    "automatic": "Automatic (detect from API)",
-                    "fixed": "Fixed price",
-                    "market": "Market price",
-                    "exchange": "Exchange price"
-                }
-            }
-        }
+{
+  "selector": {
+    "contract_type": {
+      "options": {
+        "automatic": "Automatic (detect from API)",
+        "fixed": "Fixed price",
+        "market": "Market price",
+        "exchange": "Exchange price"
+      }
     }
+  }
+}

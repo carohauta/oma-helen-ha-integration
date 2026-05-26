@@ -54,9 +54,6 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             version=2,
         )
 
-    # Migrate entities to preserve history
-    await async_migrate_entities_for_compatibility(hass, config_entry)
-
     return True
 
 

@@ -400,26 +400,28 @@ class HelenStatisticsManager:
             # Sum electricity consumption for the hour. A genuine zero-consumption
             # hour must be preserved (not treated as missing) so it is imported as a
             # zero-delta point rather than left as a permanent gap.
-            valid_electricity = [
-                q.electricity for q in quarters if q.electricity is not None
-            ]
-            # Round to 2 decimals to match official app/API precision for hourly data
-            hourly_electricity = (
-                round(sum(valid_electricity), 2) if valid_electricity else None
-            )
+            #
+            # IMPORTANT: Only aggregate if ALL quarters have data. Partial data
+            # (e.g., 3/4 quarters) creates incorrect totals and should be treated
+            # as pending/unavailable (return None).
+            electricity_values = [q.electricity for q in quarters]
+            if all(e is not None for e in electricity_values):
+                # All quarters have data - sum them
+                hourly_electricity = round(sum(electricity_values), 2)
+            else:
+                # Some quarters are null - hour is incomplete
+                hourly_electricity = None
 
             # Average spot prices for the hour (already includes VAT)
-            valid_prices = [
-                q.electricity_spot_prices_vat
-                for q in quarters
-                if q.electricity_spot_prices_vat is not None
-            ]
-            # Round to 4 decimals for price precision (used in cost calculations)
-            hourly_price = (
-                round(sum(valid_prices) / len(valid_prices), 4)
-                if valid_prices
-                else None
-            )
+            # IMPORTANT: Only average if ALL quarters have price data.
+            # Partial pricing data would create inaccurate hourly averages.
+            price_values = [q.electricity_spot_prices_vat for q in quarters]
+            if all(p is not None for p in price_values):
+                # All quarters have prices - average them
+                hourly_price = round(sum(price_values) / len(price_values), 4)
+            else:
+                # Some quarters lack prices - hour is incomplete
+                hourly_price = None
 
             # Create hourly entry
             # Note: We're reusing the MeasurementsWithSpotPriceSeries structure

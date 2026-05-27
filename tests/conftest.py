@@ -141,11 +141,11 @@ async def mock_api_setup(enable_custom_integrations, mock_helen_api_client, mock
             return_value=mock_helen_price_client,
         ),
         patch(
-            "custom_components.helen_energy.sensor.HelenApiClient",
+            "custom_components.helen_energy.coordinator.HelenApiClient",
             return_value=mock_helen_api_client,
         ),
         patch(
-            "custom_components.helen_energy.sensor.HelenPriceClient",
+            "custom_components.helen_energy.coordinator.HelenPriceClient",
             return_value=mock_helen_price_client,
         ),
     ):

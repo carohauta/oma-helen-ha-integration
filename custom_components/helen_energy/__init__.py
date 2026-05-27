@@ -17,6 +17,7 @@ from .const import (
     CONF_VAT,
     DOMAIN,
 )
+from .coordinator import HelenDataCoordinator
 from .migration import async_migrate_entities_for_compatibility, async_migrate_entry
 from .services import async_setup_services, async_unload_services
 
@@ -86,8 +87,6 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Helen Energy from a config entry."""
-    from .sensor import HelenDataCoordinator
-
     vat = entry.data[CONF_VAT] / 100
     delivery_site_id = entry.data.get(CONF_DELIVERY_SITE_ID)
     include_transfer_costs = entry.data.get(CONF_INCLUDE_TRANSFER_COSTS)

@@ -52,7 +52,7 @@ class TestHelenDataCoordinator:
         """Network errors keep last known data rather than making entities unavailable."""
         from helenservice.api_exceptions import InvalidApiResponseException
 
-        from custom_components.helen_energy.sensor import HelenDataCoordinator
+        from custom_components.helen_energy.coordinator import HelenDataCoordinator
 
         await _setup_entry(hass, mock_config_entry)
         coordinator: HelenDataCoordinator = hass.data[DOMAIN][
@@ -65,7 +65,7 @@ class TestHelenDataCoordinator:
 
         # Now simulate a network error on the next refresh
         with patch(
-            "custom_components.helen_energy.sensor._login_helen_api_if_needed",
+            "custom_components.helen_energy.coordinator._login_helen_api_if_needed",
             side_effect=InvalidApiResponseException("Network connection failed"),
         ):
             result = await coordinator._async_update_data()

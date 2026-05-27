@@ -457,27 +457,19 @@ class TestHelenStatisticsManager:
         ]
 
         # Mock _get_cumulative_at_or_before_timestamp
-        # For non-consecutive gaps, each gap queries the DB
+        # Only the first gap queries the DB; subsequent non-consecutive gaps in the
+        # same batch use the cumulative from previously processed gaps in memory
         call_counts = {"consumption": 0, "cost": 0}
 
         async def mock_get_cumulative(statistic_id, timestamp):
             if "consumption" in statistic_id:
                 call_counts["consumption"] += 1
-                if call_counts["consumption"] == 1:
-                    # First gap: cumulative before = 100.0
-                    return 100.0, timestamp
-                else:
-                    # Second gap (non-consecutive): cumulative before = 110.0
-                    # (assuming 110.0 kWh accumulated in the 2 hours between gaps)
-                    return 110.0, timestamp
+                # First gap: cumulative before = 100.0
+                return 100.0, timestamp
             else:  # cost
                 call_counts["cost"] += 1
-                if call_counts["cost"] == 1:
-                    # First gap: cumulative before = 50.0
-                    return 50.0, timestamp
-                else:
-                    # Second gap: cumulative before = 60.0
-                    return 60.0, timestamp
+                # First gap: cumulative before = 50.0
+                return 50.0, timestamp
 
         with patch.object(
             manager,
@@ -491,8 +483,9 @@ class TestHelenStatisticsManager:
                 manager.fixed_cost_statistic_id,
             )
 
-            # Verify called twice per statistic type (once for each gap)
-            assert mock_cumulative.call_count == 4  # 2 gaps * 2 statistic types
+            # Verify called once per statistic type (only first gap queries DB)
+            # Second gap uses cumulative from first gap in memory
+            assert mock_cumulative.call_count == 2  # 1 gap * 2 statistic types
 
         # Should have 2 statistics entries
         assert len(consumption_stats) == 2
@@ -505,10 +498,11 @@ class TestHelenStatisticsManager:
         # Cost: 50.0 + (1.5 * 5.00) = 57.5 EUR
         assert cost_stats[0]["sum"] == 57.5
 
-        # Second gap (non-consecutive): 110.0 + 2.0 = 112.0 kWh
-        assert consumption_stats[1]["sum"] == 112.0
-        # Cost: 60.0 + (2.0 * 6.00) = 72.0 EUR
-        assert cost_stats[1]["sum"] == 72.0
+        # Second gap (non-consecutive): uses cumulative from first gap
+        # 101.5 + 2.0 = 103.5 kWh
+        assert consumption_stats[1]["sum"] == 103.5
+        # Cost: 57.5 + (2.0 * 6.00) = 69.5 EUR
+        assert cost_stats[1]["sum"] == 69.5
 
     async def test_build_statistics_for_gaps_with_fixed_price(
         self, hass: HomeAssistant, mock_api_client

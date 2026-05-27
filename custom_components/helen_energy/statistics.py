@@ -410,6 +410,12 @@ class HelenStatisticsManager:
                 hourly_electricity = round(sum(electricity_values), 2)
             else:
                 # Some quarters are null - hour is incomplete
+                _LOGGER.debug(
+                    "Skipping incomplete hour %s - only %d/4 quarters have electricity data: %s",
+                    hour_key,
+                    sum(1 for e in electricity_values if e is not None),
+                    electricity_values,
+                )
                 hourly_electricity = None
 
             # Average spot prices for the hour (already includes VAT)
@@ -638,6 +644,10 @@ class HelenStatisticsManager:
         last_cumulative_fixed_cost = None
         last_timestamp = None
 
+        # Track ALL processed gaps in this batch to handle non-consecutive gaps correctly
+        # Dictionary: timestamp -> (consumption_cumulative, cost_cumulative, fixed_cost_cumulative)
+        processed_gaps = {}
+
         # Check if we should calculate fixed cost statistics
         has_fixed_price = self._fixed_unit_price is not None
 
@@ -663,19 +673,37 @@ class HelenStatisticsManager:
                 cumulative_cost = last_cumulative_cost
                 cumulative_fixed_cost = last_cumulative_fixed_cost
             else:
-                # Non-consecutive gap or first gap - query the database
-                cumulative_consumption, _ = await self._get_cumulative_at_or_before_timestamp(
-                    consumption_statistic_id, utc_time
-                )
-                cumulative_cost, _ = await self._get_cumulative_at_or_before_timestamp(
-                    cost_statistic_id, utc_time
-                )
-                if has_fixed_price and fixed_cost_statistic_id:
-                    cumulative_fixed_cost, _ = await self._get_cumulative_at_or_before_timestamp(
-                        fixed_cost_statistic_id, utc_time
+                # Non-consecutive gap or first gap
+                # First check if we have processed gaps in this batch before this timestamp
+                latest_processed_time = None
+                for processed_time in processed_gaps:
+                    if processed_time < utc_time:
+                        if latest_processed_time is None or processed_time > latest_processed_time:
+                            latest_processed_time = processed_time
+
+                if latest_processed_time is not None:
+                    # Use cumulative from the latest processed gap in this batch
+                    cumulative_consumption, cumulative_cost, cumulative_fixed_cost = processed_gaps[latest_processed_time]
+                    _LOGGER.debug(
+                        "Non-consecutive gap at %s: using cumulative from processed gap at %s (consumption=%.2f kWh)",
+                        utc_time.isoformat(),
+                        latest_processed_time.isoformat(),
+                        cumulative_consumption,
                     )
                 else:
-                    cumulative_fixed_cost = 0.0
+                    # No processed gaps before this one - query the database
+                    cumulative_consumption, _ = await self._get_cumulative_at_or_before_timestamp(
+                        consumption_statistic_id, utc_time
+                    )
+                    cumulative_cost, _ = await self._get_cumulative_at_or_before_timestamp(
+                        cost_statistic_id, utc_time
+                    )
+                    if has_fixed_price and fixed_cost_statistic_id:
+                        cumulative_fixed_cost, _ = await self._get_cumulative_at_or_before_timestamp(
+                            fixed_cost_statistic_id, utc_time
+                        )
+                    else:
+                        cumulative_fixed_cost = 0.0
 
             # Extract values
             electricity = self._extract_electricity_value(entry)
@@ -747,6 +775,13 @@ class HelenStatisticsManager:
             last_cumulative_cost = cumulative_cost
             last_cumulative_fixed_cost = cumulative_fixed_cost
             last_timestamp = utc_time
+
+            # Store this processed gap's cumulative values for future non-consecutive gaps
+            processed_gaps[utc_time] = (
+                cumulative_consumption,
+                cumulative_cost,
+                cumulative_fixed_cost,
+            )
 
         return consumption_stats, cost_stats, fixed_cost_stats
 

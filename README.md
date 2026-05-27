@@ -1,11 +1,11 @@
-# Oma Helen Home Assistant integration  
+# Oma Helen Home Assistant integration
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
 [![Tests](https://github.com/carohauta/oma-helen-ha-integration/actions/workflows/test.yml/badge.svg)](https://github.com/carohauta/oma-helen-ha-integration/actions/workflows/test.yml)
 
 
 [Home Assistant](https://www.home-assistant.io/) integration for [Oma Helen Python module](https://github.com/carohauta/oma-helen-cli). Periodically fetch your electricity consumption and estimated costs.
 
-![Tile card example](example.png)  
+![Tile card example](example.png)
 💡 Dashboard tip: I recommend using Tile cards for a nice, clean look like in the screenshot above.
 
 The integration works with the following contract types:
@@ -78,48 +78,25 @@ The integration automatically imports **hourly consumption statistics** into Hom
 
 The statistics include:
 - **Hourly energy consumption** (kWh) - Main consumption data for the energy dashboard
-- **Hourly spot price costs** (EUR) - Available for exchange/market price contracts
-- **Hourly fixed price costs** (EUR) - Available for fixed price contracts
+- **Hourly spot price costs** (EUR) - Track hourly costs with spot prices
+- **Hourly fixed price costs** (EUR) - Track hourly costs with fixed price
 
 ### Backfill Historical Data
 
 If you want to import historical consumption data beyond the automatic 72-hour backfill, use the `helen_energy.backfill_statistics` service.
 
+**Call from the UI**
+
+You can call actions from the UI in 'Developer Tools → Actions'. Look for `helen_energy.backfill_statistics`. Then select a `start_date` and a contract.
+
 **Service Parameters:**
 - `start_date` (required): The date to start backfilling from (format: YYYY-MM-DD)
-- `config_entry_id` (optional): Target a specific Helen Energy entry. If omitted, backfills all configured entries.
+- `config_entry_id` (optional): Target a specific Helen Energy entry. If omitted, backfills all configured contracts.
 
 **Limitations:**
 - Maximum backfill range: 365 days (1 year)
 - Always backfills from start_date to today
-- Old statistics in the date range will be cleared before backfilling to ensure data consistency
-
-**Example service calls:**
-
-Backfill the last 30 days for all Helen Energy entries:
-```yaml
-service: helen_energy.backfill_statistics
-data:
-  start_date: "2026-04-26"
-```
-
-Backfill the last 90 days for a specific entry:
-```yaml
-service: helen_energy.backfill_statistics
-data:
-  start_date: "2026-02-25"
-  config_entry_id: "your_config_entry_id_here"
-```
-
-**Finding your config_entry_id:**
-1. Go to Settings → Devices & Services → Helen Energy Price
-2. Click on the three dots menu for your entry → Download diagnostics
-3. Look for the `entry_id` field in the downloaded JSON file
-
-**When to use backfill:**
-- You want to see historical consumption in your energy dashboard
-- You've disabled statistics import and want to re-enable it with historical data
-- Helen's API had temporary issues and some hours are missing
+- **Old statistics from before the start_date will always be cleared to ensure data consistency**
 
 **Note:** Backfilling large date ranges (especially 6+ months) may take several minutes to complete. The service runs in the background, so you can continue using Home Assistant normally.
 

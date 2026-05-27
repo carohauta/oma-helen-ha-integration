@@ -15,6 +15,7 @@ from helenservice.api_exceptions import (
 from helenservice.price_client import HelenPriceClient
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
@@ -30,11 +31,29 @@ from .const import (
     CONTRACT_TYPE_MARKET,
     DOMAIN,
 )
+from .utils import conf
 
 if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
     from homeassistant.data_entry_flow import FlowResult
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _contract_type_selector() -> selector.SelectSelector:
+    """Build the contract-type select widget shared by setup and options flows."""
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[
+                selector.SelectOptionDict(value=CONTRACT_TYPE_AUTOMATIC, label="automatic"),
+                selector.SelectOptionDict(value=CONTRACT_TYPE_FIXED, label="fixed"),
+                selector.SelectOptionDict(value=CONTRACT_TYPE_MARKET, label="market"),
+                selector.SelectOptionDict(value=CONTRACT_TYPE_EXCHANGE, label="exchange"),
+            ],
+            mode="list",
+            translation_key="contract_type",
+        )
+    )
 
 
 class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -46,6 +65,16 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.api_client: HelenApiClient | None = None
         self.price_client: HelenPriceClient | None = None
+        self._user_input: dict[str, Any] | None = None
+        self._gsrn_ids: list[str] = []
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> HelenOptionsFlow:
+        """Return the options flow handler."""
+        return HelenOptionsFlow()
 
     def is_matching(self, other_flow: config_entries.ConfigFlow) -> bool:
         """Return True if the other flow is for the same domain."""
@@ -206,47 +235,16 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 await self._log_contract_data_debug("setup")
 
-                # Validate delivery site if provided
-                if "delivery_site_id" in user_input:
-                    await self.hass.async_add_executor_job(
-                        self.api_client.select_delivery_site_if_valid_id,
-                        user_input["delivery_site_id"],
-                    )
-
-                # Validate contract type only when AUTOMATIC is selected
-                if user_input.get(CONF_CONTRACT_TYPE) == CONTRACT_TYPE_AUTOMATIC:
-                    is_supported, detected_type = await self._validate_contract_type()
-                    if not is_supported:
-                        await self._cleanup_resources()
-                        return self.async_show_form(
-                            step_id="user",
-                            data_schema=self._get_user_schema(user_input),
-                            errors={CONF_CONTRACT_TYPE: "automatic_detection_failed"},
-                            description_placeholders={
-                                "detected_type": detected_type or "unknown"
-                            },
-                        )
-                    # Replace AUTOMATIC with the detected type before storing
-                    user_input[CONF_CONTRACT_TYPE] = detected_type
-                    _LOGGER.info("Automatic detection succeeded: contract type = %s", detected_type)
-
-                # Create unique ID and title
-                unique_id, default_title = self._create_unique_id_and_title(
-                    user_input["username"], user_input.get("delivery_site_id")
+                # Offer a site picker only when the account has more than one meter.
+                self._gsrn_ids = await self.hass.async_add_executor_job(
+                    self.api_client.get_all_gsrn_ids
                 )
+                if len(self._gsrn_ids) > 1:
+                    # Keep the authenticated client alive for the next step.
+                    self._user_input = user_input
+                    return await self.async_step_select_site()
 
-                # Use custom name if provided, otherwise use default
-                title = user_input.get("custom_name", "").strip()
-                if not title:
-                    title = default_title
-
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
-
-                # Build entry data and create entry
-                data = self._build_entry_data(user_input)
-                # Don't cleanup resources on success - let sensor reuse the session
-                return self.async_create_entry(title=title, data=data)
+                return await self._finalize_entry(user_input)
 
             except (
                 HelenAuthenticationException,
@@ -259,12 +257,84 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:
                 _LOGGER.exception("Unexpected error during Helen Energy setup")
                 errors = {"base": "cannot_connect"}
-            finally:
-                await self._cleanup_resources()
+            await self._cleanup_resources()
 
         return self.async_show_form(
             step_id="user", data_schema=self._get_user_schema(user_input), errors=errors
         )
+
+    async def async_step_select_site(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Let the user pick which delivery site (GSRN) to monitor."""
+        if user_input is not None:
+            chosen = user_input[CONF_DELIVERY_SITE_ID]
+            try:
+                await self.hass.async_add_executor_job(
+                    self.api_client.select_delivery_site_if_valid_id, chosen
+                )
+            except InvalidDeliverySiteException as ex:
+                return self.async_show_form(
+                    step_id="select_site",
+                    data_schema=self._get_site_schema(),
+                    errors=self._handle_errors(ex),
+                )
+            return await self._finalize_entry(
+                {**self._user_input, CONF_DELIVERY_SITE_ID: chosen}
+            )
+
+        return self.async_show_form(
+            step_id="select_site", data_schema=self._get_site_schema()
+        )
+
+    def _get_site_schema(self) -> vol.Schema:
+        """Build the GSRN selection schema from the available meters."""
+        return vol.Schema(
+            {
+                vol.Required(CONF_DELIVERY_SITE_ID): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            selector.SelectOptionDict(value=g, label=g)
+                            for g in self._gsrn_ids
+                        ],
+                        mode="dropdown",
+                    )
+                )
+            }
+        )
+
+    async def _finalize_entry(self, user_input: dict[str, Any]) -> FlowResult:
+        """Validate the contract type and create the config entry."""
+        # Validate contract type only when AUTOMATIC is selected
+        if user_input.get(CONF_CONTRACT_TYPE) == CONTRACT_TYPE_AUTOMATIC:
+            is_supported, detected_type = await self._validate_contract_type()
+            if not is_supported:
+                await self._cleanup_resources()
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=self._get_user_schema(user_input),
+                    errors={CONF_CONTRACT_TYPE: "automatic_detection_failed"},
+                    description_placeholders={
+                        "detected_type": detected_type or "unknown"
+                    },
+                )
+            # Replace AUTOMATIC with the detected type before storing
+            user_input[CONF_CONTRACT_TYPE] = detected_type
+            _LOGGER.info(
+                "Automatic detection succeeded: contract type = %s", detected_type
+            )
+
+        unique_id, default_title = self._create_unique_id_and_title(
+            user_input["username"], user_input.get(CONF_DELIVERY_SITE_ID)
+        )
+        title = user_input.get("custom_name", "").strip() or default_title
+
+        await self.async_set_unique_id(unique_id)
+        self._abort_if_unique_id_configured()
+
+        data = self._build_entry_data(user_input)
+        await self._cleanup_resources()
+        return self.async_create_entry(title=title, data=data)
 
     def _get_user_schema(self, user_input: dict[str, Any] | None = None) -> vol.Schema:
         """Get the user input schema."""
@@ -283,27 +353,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ),
                     vol.Required(
                         CONF_CONTRACT_TYPE, default=CONTRACT_TYPE_AUTOMATIC
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=[
-                                selector.SelectOptionDict(
-                                    value=CONTRACT_TYPE_AUTOMATIC, label="automatic"
-                                ),
-                                selector.SelectOptionDict(
-                                    value=CONTRACT_TYPE_FIXED, label="fixed"
-                                ),
-                                selector.SelectOptionDict(
-                                    value=CONTRACT_TYPE_MARKET, label="market"
-                                ),
-                                selector.SelectOptionDict(
-                                    value=CONTRACT_TYPE_EXCHANGE, label="exchange"
-                                ),
-                            ],
-                            mode="list",
-                            translation_key="contract_type",
-                        )
-                    ),
-                    vol.Optional("delivery_site_id"): str,
+                    ): _contract_type_selector(),
                     vol.Optional("default_unit_price"): vol.All(
                         vol.Coerce(float),
                         vol.Range(min=0.00001),
@@ -436,3 +486,55 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             await self._cleanup_resources()
             return self.async_abort(reason="unknown")
+
+
+class HelenOptionsFlow(config_entries.OptionsFlow):
+    """Handle reconfiguration of an existing Helen Energy entry."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_VAT): vol.All(
+                    vol.Coerce(float),
+                    vol.Range(min=0.0, max=100.0),
+                    msg="VAT percentage must be between 0 and 100",
+                ),
+                vol.Required(CONF_CONTRACT_TYPE): _contract_type_selector(),
+                vol.Optional(CONF_INCLUDE_TRANSFER_COSTS): bool,
+                vol.Optional(CONF_DEFAULT_UNIT_PRICE): vol.All(
+                    vol.Coerce(float),
+                    vol.Range(min=0.00001),
+                    msg="Unit price must be greater than 0",
+                ),
+                vol.Optional(CONF_DEFAULT_BASE_PRICE): vol.All(
+                    vol.Coerce(float),
+                    vol.Range(min=0.00001),
+                    msg="Base price must be greater than 0",
+                ),
+            }
+        )
+
+        suggested: dict[str, Any] = {
+            CONF_VAT: conf(self.config_entry, CONF_VAT, 25.5),
+            CONF_CONTRACT_TYPE: conf(
+                self.config_entry, CONF_CONTRACT_TYPE, CONTRACT_TYPE_AUTOMATIC
+            ),
+            CONF_INCLUDE_TRANSFER_COSTS: conf(
+                self.config_entry, CONF_INCLUDE_TRANSFER_COSTS, False
+            ),
+        }
+        for key in (CONF_DEFAULT_UNIT_PRICE, CONF_DEFAULT_BASE_PRICE):
+            value = conf(self.config_entry, key)
+            if value is not None:
+                suggested[key] = value
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+        )

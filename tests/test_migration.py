@@ -1,11 +1,8 @@
 """Test the Helen Energy migration utilities."""
 
-from unittest.mock import Mock, patch
-
 from custom_components.helen_energy.migration import (
     LEGACY_ENTITY_MAPPINGS,
     get_legacy_entity_name,
-    should_use_legacy_names,
 )
 
 
@@ -36,63 +33,6 @@ class TestMigrationUtilities:
         """Test getting legacy entity name for unknown sensor type."""
         result = get_legacy_entity_name("unknown_sensor_type")
         assert result == "Helen Unknown Sensor Type"
-
-    def test_should_use_legacy_names_first_entry_with_legacy_entities(self):
-        """Test should use legacy names for first entry with legacy entities."""
-        mock_hass = Mock()
-        mock_config_entry = Mock()
-        mock_config_entry.entry_id = "test_entry"
-
-        # Mock as first entry
-        mock_hass.config_entries.async_entries.return_value = [mock_config_entry]
-
-        # Mock entity registry with legacy entity
-        mock_entity_registry = Mock()
-        mock_entity_registry.async_get.return_value = Mock(config_entry_id=None)
-
-        with patch(
-            "custom_components.helen_energy.migration.er.async_get",
-            return_value=mock_entity_registry,
-        ):
-            result = should_use_legacy_names(mock_hass, mock_config_entry)
-            assert result is True
-
-    def test_should_use_legacy_names_first_entry_no_legacy_entities(self):
-        """Test should use legacy names for first entry without legacy entities."""
-        mock_hass = Mock()
-        mock_config_entry = Mock()
-        mock_config_entry.entry_id = "test_entry"
-
-        # Mock as first entry
-        mock_hass.config_entries.async_entries.return_value = [mock_config_entry]
-
-        # Mock entity registry with no legacy entities
-        mock_entity_registry = Mock()
-        mock_entity_registry.async_get.return_value = None
-
-        with patch(
-            "custom_components.helen_energy.migration.er.async_get",
-            return_value=mock_entity_registry,
-        ):
-            result = should_use_legacy_names(mock_hass, mock_config_entry)
-            assert result is False
-
-    def test_should_use_legacy_names_not_first_entry(self):
-        """Test should use legacy names when not first entry."""
-        mock_hass = Mock()
-        mock_config_entry = Mock()
-        mock_config_entry.entry_id = "test_entry"
-
-        # Mock as second entry
-        mock_first_entry = Mock()
-        mock_first_entry.entry_id = "first_entry"
-        mock_hass.config_entries.async_entries.return_value = [
-            mock_first_entry,
-            mock_config_entry,
-        ]
-
-        result = should_use_legacy_names(mock_hass, mock_config_entry)
-        assert result is False
 
 
 class TestLegacyEntityMappings:

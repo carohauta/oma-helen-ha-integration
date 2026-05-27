@@ -82,6 +82,10 @@ class HelenStatisticsManager:
             f"{fixed_unit_price} cents/kWh" if fixed_unit_price else "None",
         )
 
+    def set_fixed_unit_price(self, price: float | None) -> None:
+        """Set the fixed unit price (cents/kWh) used for fixed-cost statistics."""
+        self._fixed_unit_price = price
+
     async def import_recent_statistics(self) -> None:
         """Import recent hourly statistics with gap detection and filling."""
         _LOGGER.debug("Starting statistics import for %s", self.entity_id)
@@ -393,13 +397,15 @@ class HelenStatisticsManager:
                     )
                 continue
 
-            # Sum electricity consumption for the hour
-            hourly_electricity_sum = sum(
+            # Sum electricity consumption for the hour. A genuine zero-consumption
+            # hour must be preserved (not treated as missing) so it is imported as a
+            # zero-delta point rather than left as a permanent gap.
+            valid_electricity = [
                 q.electricity for q in quarters if q.electricity is not None
-            )
+            ]
             # Round to 2 decimals to match official app/API precision for hourly data
             hourly_electricity = (
-                round(hourly_electricity_sum, 2) if hourly_electricity_sum else None
+                round(sum(valid_electricity), 2) if valid_electricity else None
             )
 
             # Average spot prices for the hour (already includes VAT)
@@ -421,7 +427,7 @@ class HelenStatisticsManager:
             hourly_entry = MeasurementsWithSpotPriceSeries(
                 start=hour_key,
                 stop=quarters[-1].stop,  # End of the last quarter
-                electricity=hourly_electricity if hourly_electricity else None,
+                electricity=hourly_electricity,
                 electricity_spot_prices_vat=hourly_price,
             )
 

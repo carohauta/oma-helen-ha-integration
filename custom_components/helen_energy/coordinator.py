@@ -14,9 +14,9 @@ from helenservice.utils import get_month_date_range_by_date
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import CONF_DEFAULT_UNIT_PRICE, DOMAIN
+from .const import CONF_DEFAULT_UNIT_PRICE
 from .statistics import HelenStatisticsManager
-from .utils import safe_round
+from .utils import conf, get_entry_position, safe_round
 
 if TYPE_CHECKING:
     from helenservice.api_response import MeasurementsWithSpotPriceResponse
@@ -57,27 +57,14 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         # Initialize statistics manager
         # Generate entity_id for monthly consumption sensor
         # For the first entry, use the standard entity ID
-        helen_entries = list(hass.config_entries.async_entries(DOMAIN))
-        is_first_entry = (
-            len(helen_entries) >= 1 and helen_entries[0] == config_entry
-        )
-
+        is_first_entry, entry_index = get_entry_position(hass, config_entry)
         if is_first_entry:
             entity_id = "sensor.helen_monthly_consumption"
         else:
-            # For additional entries, construct entity_id with suffix
-            entry_index = next(
-                (
-                    i
-                    for i, entry in enumerate(helen_entries)
-                    if entry == config_entry
-                ),
-                1,
-            )
             entity_id = f"sensor.helen_monthly_consumption_{entry_index + 1}"
 
         # Get user-configured fixed unit price (if any)
-        config_fixed_unit_price = config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)
+        config_fixed_unit_price = conf(config_entry, CONF_DEFAULT_UNIT_PRICE)
 
         self.statistics_manager = HelenStatisticsManager(
             hass,
@@ -243,10 +230,9 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             if self.statistics_manager:
                 # Update fixed unit price from API if not configured by user
                 # Priority: 1. User config, 2. API contract price
-                config_price = self.config_entry.data.get(CONF_DEFAULT_UNIT_PRICE)
-                if config_price is None:
+                if conf(self.config_entry, CONF_DEFAULT_UNIT_PRICE) is None:
                     # Use API price if available (only for fixed-price contracts)
-                    self.statistics_manager._fixed_unit_price = data.get("unit_price")
+                    self.statistics_manager.set_fixed_unit_price(data.get("unit_price"))
 
                 try:
                     await self.statistics_manager.import_recent_statistics()

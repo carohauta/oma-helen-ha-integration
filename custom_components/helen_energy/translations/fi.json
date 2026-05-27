@@ -12,7 +12,6 @@
           "custom_name": "Yksilöllinen nimi sopimukselle",
           "default_unit_price": "Yliaja yksikköhinta (c/kWh, valinnainen)",
           "default_base_price": "Yliaja perusmaksu (EUR/kk, valinnainen)",
-          "delivery_site_id": "Käyttöpaikan tunnus (valinnainen)",
           "include_transfer_costs": "Siirtomaksut"
         },
         "data_description": {
@@ -20,8 +19,17 @@
           "contract_type": "Valitse sopimustyyppi. 'Automaattinen' tunnistaa sen automaattisesti, tai valitse manuaalisesti jos automaattinen tunnistus epäonnistuu.",
           "default_unit_price": "Aseta yksikköhinta, jos haluat ohittaa Helenin hinnan",
           "default_base_price": "Aseta perusmaksu, jos haluat ohittaa Helenin perusmaksun",
-          "delivery_site_id": "Jos sinulla on useita käyttöpaikkoja, syötä seurattavan käyttöpaikan tunnus",
           "include_transfer_costs": "Valitse, jos halua seurata myös sähkönsiirtokuluja"
+        }
+      },
+      "select_site": {
+        "title": "Valitse käyttöpaikka",
+        "description": "Tililläsi on useampi kuin yksi käyttöpaikka. Valitse seurattavan mittarin GSRN-tunnus tälle sopimukselle.",
+        "data": {
+          "delivery_site_id": "Käyttöpaikka (GSRN)"
+        },
+        "data_description": {
+          "delivery_site_id": "Seurattavan mittarin 18-numeroinen GSRN-tunnus"
         }
       },
       "reauth_confirm": {
@@ -42,6 +50,27 @@
       "reauth_failed": "Uudelleentunnistautuminen epäonnistui. Yritä uudelleen.",
       "invalid_auth": "Virheellinen käyttäjätunnus tai salasana. Tarkista tunnukset ja yritä uudelleen.",
       "unknown": "Odottamaton virhe tapahtui. Tarkista lokit saadaksesi lisätietoja."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Helen Energy -asetukset",
+        "description": "Muuta näitä asetuksia poistamatta ja lisäämättä integraatiota uudelleen. Sopimus ladataan uudelleen tallennuksen jälkeen.",
+        "data": {
+          "vat": "ALV-prosentti",
+          "contract_type": "Sopimustyyppi",
+          "include_transfer_costs": "Siirtomaksut",
+          "default_unit_price": "Yliaja yksikköhinta (c/kWh, valinnainen)",
+          "default_base_price": "Yliaja perusmaksu (EUR/kk, valinnainen)"
+        },
+        "data_description": {
+          "contract_type": "Valitse sopimustyyppi tai 'Automaattinen' tunnistaaksesi sen rajapinnasta.",
+          "include_transfer_costs": "Valitse, jos haluat seurata myös sähkönsiirtokuluja",
+          "default_unit_price": "Jätä tyhjäksi käyttääksesi Helenin hintaa",
+          "default_base_price": "Jätä tyhjäksi käyttääksesi Helenin perusmaksua"
+        }
+      }
     }
   },
   "selector": {

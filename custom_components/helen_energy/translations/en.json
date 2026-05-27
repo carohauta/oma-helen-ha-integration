@@ -12,7 +12,6 @@
           "custom_name": "Custom name for this entry",
           "default_unit_price": "Override unit price (c/kWh, optional)",
           "default_base_price": "Override base price (EUR/month, optional)",
-          "delivery_site_id": "Delivery site ID (optional)",
           "include_transfer_costs": "Transfer costs"
         },
         "data_description": {
@@ -20,8 +19,17 @@
           "contract_type": "Choose your contract type. Select 'Automatic' to detect it automatically, or choose manually if automatic detection fails.",
           "default_unit_price": "Set the unit price if you want to override Helen's price",
           "default_base_price": "Set the base price if you want to override Helen's base price",
-          "delivery_site_id": "If you have multiple delivery sites, enter the ID of the site you want to monitor",
           "include_transfer_costs": "Select if you want to monitor electricity transfer costs as well"
+        }
+      },
+      "select_site": {
+        "title": "Select delivery site",
+        "description": "Your account has more than one delivery site. Choose the GSRN of the meter you want to monitor with this entry.",
+        "data": {
+          "delivery_site_id": "Delivery site (GSRN)"
+        },
+        "data_description": {
+          "delivery_site_id": "The 18-digit GSRN of the meter to monitor"
         }
       },
       "reauth_confirm": {
@@ -42,6 +50,27 @@
       "reauth_failed": "Reauthentication failed. Please try again.",
       "invalid_auth": "Invalid username or password. Check your credentials and try again.",
       "unknown": "An unexpected error occurred. Please check the logs for more details."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Helen Energy options",
+        "description": "Change these settings without removing and re-adding the integration. The entry reloads after saving.",
+        "data": {
+          "vat": "VAT percentage",
+          "contract_type": "Contract type",
+          "include_transfer_costs": "Transfer costs",
+          "default_unit_price": "Override unit price (c/kWh, optional)",
+          "default_base_price": "Override base price (EUR/month, optional)"
+        },
+        "data_description": {
+          "contract_type": "Choose your contract type, or 'Automatic' to detect it from the API.",
+          "include_transfer_costs": "Select if you want to monitor electricity transfer costs as well",
+          "default_unit_price": "Leave empty to use Helen's price",
+          "default_base_price": "Leave empty to use Helen's base price"
+        }
+      }
     }
   },
   "selector": {

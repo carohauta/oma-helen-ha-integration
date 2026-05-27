@@ -141,25 +141,3 @@ def get_legacy_entity_name(sensor_type: str) -> str:
     return legacy_names.get(
         sensor_type, f"Helen {sensor_type.replace('_', ' ').title()}"
     )
-
-
-def should_use_legacy_names(hass, config_entry) -> bool:
-    """Determine if we should use legacy entity names for this config entry."""
-    # Use legacy names only if:
-    # 1. This is the first Helen Energy integration entry, AND
-    # 2. There are legacy entities that can be migrated
-
-    helen_entries = list(hass.config_entries.async_entries(DOMAIN))
-    is_first_entry = len(helen_entries) == 1 and helen_entries[0] == config_entry
-
-    if not is_first_entry:
-        return False
-
-    # Check if there are any legacy entities that could be migrated
-    entity_registry = er.async_get(hass)
-    for legacy_entity_id in LEGACY_ENTITY_MAPPINGS:
-        existing_entity = entity_registry.async_get(legacy_entity_id)
-        if existing_entity and existing_entity.config_entry_id is None:
-            return True
-
-    return False

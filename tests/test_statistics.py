@@ -132,6 +132,57 @@ class TestHelenStatisticsManager:
         assert len(series) == 3
         assert series[0].electricity == 2.0
 
+    def test_aggregate_to_hourly_preserves_zero_consumption(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """A genuine zero-consumption hour must be emitted, not dropped as missing."""
+        manager = HelenStatisticsManager(
+            hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)"
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        base = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
+        quarters = [
+            Mock(
+                start=(base + timedelta(minutes=15 * i)).isoformat(),
+                stop=(base + timedelta(minutes=15 * (i + 1))).isoformat(),
+                electricity=0.0,
+                electricity_spot_prices_vat=500.0,
+            )
+            for i in range(4)
+        ]
+
+        hourly = manager._aggregate_to_hourly(quarters)
+
+        assert len(hourly) == 1
+        # Zero is real data, not a gap -> preserved as 0.0 (was previously dropped to None)
+        assert hourly[0].electricity == 0.0
+
+    def test_aggregate_to_hourly_all_missing_is_none(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """An hour where every quarter lacks data stays None (a real gap)."""
+        manager = HelenStatisticsManager(
+            hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)"
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        base = datetime(2024, 5, 15, 11, 0, 0, tzinfo=helsinki_tz)
+        quarters = [
+            Mock(
+                start=(base + timedelta(minutes=15 * i)).isoformat(),
+                stop=(base + timedelta(minutes=15 * (i + 1))).isoformat(),
+                electricity=None,
+                electricity_spot_prices_vat=None,
+            )
+            for i in range(4)
+        ]
+
+        hourly = manager._aggregate_to_hourly(quarters)
+
+        assert len(hourly) == 1
+        assert hourly[0].electricity is None
+
     async def test_get_existing_statistics_in_window(
         self, hass: HomeAssistant, mock_api_client
     ):

@@ -20,6 +20,7 @@ from .const import (
 from .coordinator import HelenDataCoordinator
 from .migration import async_migrate_entities_for_compatibility, async_migrate_entry
 from .services import async_setup_services, async_unload_services
+from .utils import conf
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -85,11 +86,16 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     return True
 
 
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the entry when its options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Helen Energy from a config entry."""
-    vat = entry.data[CONF_VAT] / 100
+    vat = conf(entry, CONF_VAT) / 100
     delivery_site_id = entry.data.get(CONF_DELIVERY_SITE_ID)
-    include_transfer_costs = entry.data.get(CONF_INCLUDE_TRANSFER_COSTS)
+    include_transfer_costs = conf(entry, CONF_INCLUDE_TRANSFER_COSTS)
 
     credentials = {
         "username": entry.data[CONF_USERNAME],
@@ -129,6 +135,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register services (only once, when first entry is set up)
     if len(hass.data[DOMAIN]) == 1:
         await async_setup_services(hass)
+
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

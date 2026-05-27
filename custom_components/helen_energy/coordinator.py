@@ -214,7 +214,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                     *get_month_date_range_by_date(current_month),
                 )
                 data["smart_guarantee"] = {
-                    "current_month_impact": current_month_impact,
+                    "current_month_impact": safe_round(current_month_impact),
                 }
             except InvalidApiResponseException:
                 data["smart_guarantee"] = None

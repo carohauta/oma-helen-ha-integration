@@ -399,7 +399,8 @@ class HelenExchangeElectricity(HelenBaseSensor):
         if not exchange_costs:
             return None
 
-        return safe_round(exchange_costs["current_month"] + base_price)
+        current_month_cost = exchange_costs.get("current_month", 0)
+        return safe_round(current_month_cost + base_price)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -414,7 +415,8 @@ class HelenExchangeElectricity(HelenBaseSensor):
         if not exchange_costs:
             return self._get_consumption_attributes(data)
 
-        last_month_total_cost = safe_round(exchange_costs["last_month"] + base_price)
+        last_month_cost = exchange_costs.get("last_month", 0)
+        last_month_total_cost = safe_round(last_month_cost + base_price)
 
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
@@ -455,7 +457,7 @@ class HelenSmartGuarantee(HelenBaseSensor):
 
         base_price = self._get_base_price(data)
         current_month_consumption = data.get("current_month_consumption", 0)
-        current_month_impact = smart_guarantee["current_month_impact"]
+        current_month_impact = smart_guarantee.get("current_month_impact", 0)
         unit_price = self._get_unit_price(data)
 
         current_month_energy_price_with_impact = (
@@ -482,8 +484,9 @@ class HelenSmartGuarantee(HelenBaseSensor):
             return self._get_consumption_attributes(data)
 
         unit_price = self._get_unit_price(data)
+        current_month_impact = smart_guarantee.get("current_month_impact", 0)
         current_month_energy_price_with_impact = safe_round(
-            (unit_price + smart_guarantee["current_month_impact"]) / 100
+            (unit_price + current_month_impact) / 100
         )
 
         attributes = {

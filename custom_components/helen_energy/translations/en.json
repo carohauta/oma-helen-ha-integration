@@ -56,7 +56,7 @@
     "step": {
       "init": {
         "title": "Helen Energy options",
-        "description": "Change these settings without removing and re-adding the integration. The entry reloads after saving.",
+        "description": "Change these settings without removing and re-adding the integration. The entry reloads after saving. Note: price changes apply only to statistics imported from now on – already-imported history keeps its old values. To recalculate past cost statistics, run the Backfill statistics action.",
         "data": {
           "vat": "VAT percentage",
           "contract_type": "Contract type",
@@ -67,7 +67,7 @@
         "data_description": {
           "contract_type": "Choose your contract type, or 'Automatic' to detect it from the API.",
           "include_transfer_costs": "Select if you want to monitor electricity transfer costs as well",
-          "default_unit_price": "Leave empty to use Helen's price",
+          "default_unit_price": "Leave empty to use Helen's price. Applies to newly imported hours only; run the Backfill statistics action to apply it to past data.",
           "default_base_price": "Leave empty to use Helen's base price"
         }
       }

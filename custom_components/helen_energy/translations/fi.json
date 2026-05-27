@@ -56,7 +56,7 @@
     "step": {
       "init": {
         "title": "Helen Energy -asetukset",
-        "description": "Muuta näitä asetuksia poistamatta ja lisäämättä integraatiota uudelleen. Sopimus ladataan uudelleen tallennuksen jälkeen.",
+        "description": "Muuta näitä asetuksia poistamatta ja lisäämättä integraatiota uudelleen. Sopimus ladataan uudelleen tallennuksen jälkeen. Huom: hintamuutokset vaikuttavat vain tästä eteenpäin tuotaviin tilastoihin – jo tuotu historia säilyttää vanhat arvonsa. Laske menneet kustannustilastot uudelleen ajamalla Backfill statistics -toiminto.",
         "data": {
           "vat": "ALV-prosentti",
           "contract_type": "Sopimustyyppi",
@@ -67,7 +67,7 @@
         "data_description": {
           "contract_type": "Valitse sopimustyyppi tai 'Automaattinen' tunnistaaksesi sen rajapinnasta.",
           "include_transfer_costs": "Valitse, jos haluat seurata myös sähkönsiirtokuluja",
-          "default_unit_price": "Jätä tyhjäksi käyttääksesi Helenin hintaa",
+          "default_unit_price": "Jätä tyhjäksi käyttääksesi Helenin hintaa. Vaikuttaa vain uusiin tuotaviin tunteihin; aja Backfill statistics -toiminto soveltaaksesi sitä menneeseen dataan.",
           "default_base_price": "Jätä tyhjäksi käyttääksesi Helenin perusmaksua"
         }
       }

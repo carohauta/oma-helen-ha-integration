@@ -47,7 +47,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             )
 
         config_entry_id: str | None = call.data.get("config_entry_id")
-        contract_msg = f" for config entry {config_entry_id}" if config_entry_id else " for all contracts"
+        contract_msg = (
+            f" for config entry {config_entry_id}"
+            if config_entry_id
+            else " for all contracts"
+        )
         _LOGGER.info(
             "Backfill service called: %s to %s (%d days)%s",
             start_date,
@@ -72,7 +76,9 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         if not coordinators:
             if config_entry_id:
-                raise ServiceValidationError(f"Config entry {config_entry_id} not found")
+                raise ServiceValidationError(
+                    f"Config entry {config_entry_id} not found"
+                )
             else:
                 raise ServiceValidationError("No coordinators found")
 
@@ -81,11 +87,13 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         statistic_ids = []
         for coordinator in coordinators:
             if coordinator.statistics_manager:
-                statistic_ids.extend([
-                    coordinator.statistics_manager.consumption_statistic_id,
-                    coordinator.statistics_manager.cost_statistic_id,
-                    coordinator.statistics_manager.fixed_cost_statistic_id,
-                ])
+                statistic_ids.extend(
+                    [
+                        coordinator.statistics_manager.consumption_statistic_id,
+                        coordinator.statistics_manager.cost_statistic_id,
+                        coordinator.statistics_manager.fixed_cost_statistic_id,
+                    ]
+                )
 
         if statistic_ids:
             recorder = get_instance(hass)
@@ -105,7 +113,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                         await coordinator.hass.async_add_executor_job(
                             lambda: coordinator.api_client.login_and_init(
                                 coordinator.credentials["username"],
-                                coordinator.credentials["password"]
+                                coordinator.credentials["password"],
                             )
                         )
                     else:
@@ -119,16 +127,26 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                         "Successfully backfilled statistics for %s",
                         coordinator.statistics_manager.entity_id,
                     )
+            except ValueError as err:
+                # Check if this is our custom error about contract dates
+                if "outside your contract period" in str(err):
+                    raise ServiceValidationError(f"Backfill failed: {err}") from err
+                else:
+                    raise
             except Exception as err:
                 _LOGGER.error(
                     "Failed to backfill statistics for %s: %s",
-                    coordinator.statistics_manager.entity_id if coordinator.statistics_manager else "unknown",
+                    coordinator.statistics_manager.entity_id
+                    if coordinator.statistics_manager
+                    else "unknown",
                     err,
                     exc_info=True,
                 )
 
         if success_count == 0:
-            raise ServiceValidationError("Failed to backfill statistics for any coordinator. Check logs for details.")
+            raise ServiceValidationError(
+                "Failed to backfill statistics for any coordinator. Check logs for details."
+            )
 
         _LOGGER.info("Backfill completed for %d coordinator(s)", success_count)
 

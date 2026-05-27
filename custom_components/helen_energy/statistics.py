@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from helenservice import RESOLUTION_HOUR, RESOLUTION_QUARTER, HelenApiClient
+from helenservice.api_exceptions import InvalidApiResponseException
 from helenservice.api_response import (
     MeasurementsWithSpotPriceResponse,
     MeasurementsWithSpotPriceSeries,
@@ -231,7 +232,32 @@ class HelenStatisticsManager:
 
             await self._fill_gaps(response.series)
 
+        except InvalidApiResponseException as err:
+            # Check if this is a "no relevant contract" error
+            error_msg = str(err)
+            if "no-relevant-contract" in error_msg.lower() or "no relevant contracts" in error_msg.lower():
+                _LOGGER.warning(
+                    "Backfill failed for %s: Requested date range (%s to %s) is outside contract period",
+                    self.entity_id,
+                    start_date,
+                    end_date,
+                )
+                # Re-raise with more context to be caught by service handler
+                raise ValueError(
+                    f"Requested date range ({start_date} to {end_date}) is outside your contract period. "
+                    "Please select a date range within your active contract dates."
+                ) from err
+            else:
+                # Other API errors - log and re-raise
+                _LOGGER.error(
+                    "Helen API error during backfill for %s: %s",
+                    self.entity_id,
+                    err,
+                    exc_info=True,
+                )
+                raise
         except Exception as err:
+            # Other unexpected errors
             _LOGGER.error(
                 "Error during backfill for %s: %s",
                 self.entity_id,
@@ -259,34 +285,61 @@ class HelenStatisticsManager:
             "Fetching 15-minute interval data from %s to %s", start_date, end_date
         )
 
-        # Fetch 15-minute data using executor to avoid blocking
-        response: MeasurementsWithSpotPriceResponse = (
-            await self.hass.async_add_executor_job(
-                self.api_client.get_measurements_with_spot_prices,
-                start_date,
-                end_date,
-                RESOLUTION_QUARTER,  # 15-minute intervals for precise pricing
-            )
-        )
-
-        _LOGGER.debug(
-            "Received %d 15-minute intervals from API (resolution: %s)",
-            len(response.series),
-            response.resolution,
-        )
-
-        if response.missing_series:
-            _LOGGER.warning(
-                "API reported %d missing 15-minute intervals", len(response.missing_series)
+        try:
+            # Fetch 15-minute data using executor to avoid blocking
+            response: MeasurementsWithSpotPriceResponse = (
+                await self.hass.async_add_executor_job(
+                    self.api_client.get_measurements_with_spot_prices,
+                    start_date,
+                    end_date,
+                    RESOLUTION_QUARTER,  # 15-minute intervals for precise pricing
+                )
             )
 
-        # Aggregate 15-minute intervals to hourly
-        hourly_series = self._aggregate_to_hourly(response.series)
-        _LOGGER.debug(
-            "Aggregated to %d hourly intervals", len(hourly_series)
-        )
+            _LOGGER.debug(
+                "Received %d 15-minute intervals from API (resolution: %s)",
+                len(response.series),
+                response.resolution,
+            )
 
-        return hourly_series
+            if response.missing_series:
+                _LOGGER.warning(
+                    "API reported %d missing 15-minute intervals", len(response.missing_series)
+                )
+
+            # Aggregate 15-minute intervals to hourly
+            hourly_series = self._aggregate_to_hourly(response.series)
+            _LOGGER.debug(
+                "Aggregated to %d hourly intervals", len(hourly_series)
+            )
+
+            return hourly_series
+
+        except InvalidApiResponseException as err:
+            error_msg = str(err)
+            if "no-relevant-contract" in error_msg.lower() or "no relevant contracts" in error_msg.lower():
+                _LOGGER.warning(
+                    "Cannot fetch interval data for %s: Date range outside contract period",
+                    self.entity_id,
+                )
+                # Return empty series rather than crashing - coordinator will handle gracefully
+                return []
+            else:
+                _LOGGER.error(
+                    "Helen API error fetching interval data for %s: %s",
+                    self.entity_id,
+                    err,
+                    exc_info=True,
+                )
+                raise
+        except Exception as err:
+            _LOGGER.error(
+                "Error fetching interval data for %s: %s",
+                self.entity_id,
+                err,
+                exc_info=True,
+            )
+            raise
 
     def _aggregate_to_hourly(
         self, quarter_series: list[MeasurementsWithSpotPriceSeries]

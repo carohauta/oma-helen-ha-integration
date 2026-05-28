@@ -457,19 +457,21 @@ class TestHelenStatisticsManager:
         ]
 
         # Mock _get_cumulative_at_or_before_timestamp
-        # Only the first gap queries the DB; subsequent non-consecutive gaps in the
-        # same batch use the cumulative from previously processed gaps in memory
+        # Both gaps query the DB first, but the second gap then uses the first gap's
+        # cumulative from memory since it's more recent than the DB result
         call_counts = {"consumption": 0, "cost": 0}
 
         async def mock_get_cumulative(statistic_id, timestamp):
+            # Returns (cumulative, timestamp_of_last_record)
+            # For a fresh system with no existing data, return None timestamp
             if "consumption" in statistic_id:
                 call_counts["consumption"] += 1
-                # First gap: cumulative before = 100.0
-                return 100.0, timestamp
+                # No existing data in DB
+                return 100.0, None
             else:  # cost
                 call_counts["cost"] += 1
-                # First gap: cumulative before = 50.0
-                return 50.0, timestamp
+                # No existing data in DB
+                return 50.0, None
 
         with patch.object(
             manager,
@@ -483,9 +485,9 @@ class TestHelenStatisticsManager:
                 manager.fixed_cost_statistic_id,
             )
 
-            # Verify called once per statistic type (only first gap queries DB)
-            # Second gap uses cumulative from first gap in memory
-            assert mock_cumulative.call_count == 2  # 1 gap * 2 statistic types
+            # Both gaps query DB first (2 gaps * 2 statistic types = 4 calls)
+            # Second gap then uses first gap's cumulative from memory
+            assert mock_cumulative.call_count == 4  # 2 gaps * 2 statistic types
 
         # Should have 2 statistics entries
         assert len(consumption_stats) == 2

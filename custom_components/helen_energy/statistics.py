@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -273,10 +272,10 @@ class HelenStatisticsManager:
     async def _fetch_interval_data(
         self,
     ) -> list[MeasurementsWithSpotPriceSeries]:
-        """Fetch 15-minute interval data from API and aggregate to hourly.
+        """Fetch hourly interval data from API.
 
         Uses STATISTICS_BACKFILL_HOURS constant to determine how far back to fetch.
-        Fetches 15-minute data for precise pricing, then aggregates to hourly.
+        Fetches hourly data directly from Helen's API (same as manual backfill).
 
         Returns:
             List of measurement series with hourly intervals
@@ -286,38 +285,33 @@ class HelenStatisticsManager:
         start_date = end_date - timedelta(days=STATISTICS_BACKFILL_HOURS // 24 + 1)
 
         _LOGGER.debug(
-            "Fetching 15-minute interval data from %s to %s", start_date, end_date
+            "Fetching hourly interval data from %s to %s", start_date, end_date
         )
 
         try:
-            # Fetch 15-minute data using executor to avoid blocking
+            # Fetch hourly data using executor to avoid blocking
             response: MeasurementsWithSpotPriceResponse = (
                 await self.hass.async_add_executor_job(
                     self.api_client.get_measurements_with_spot_prices,
                     start_date,
                     end_date,
-                    RESOLUTION_QUARTER,  # 15-minute intervals for precise pricing
+                    RESOLUTION_HOUR,  # Hourly intervals (same as manual backfill)
                 )
             )
 
             _LOGGER.debug(
-                "Received %d 15-minute intervals from API (resolution: %s)",
+                "Received %d hourly intervals from API (resolution: %s)",
                 len(response.series),
                 response.resolution,
             )
 
             if response.missing_series:
                 _LOGGER.warning(
-                    "API reported %d missing 15-minute intervals", len(response.missing_series)
+                    "API reported %d missing hourly intervals", len(response.missing_series)
                 )
 
-            # Aggregate 15-minute intervals to hourly
-            hourly_series = self._aggregate_to_hourly(response.series)
-            _LOGGER.debug(
-                "Aggregated to %d hourly intervals", len(hourly_series)
-            )
-
-            return hourly_series
+            # Return hourly data directly (no aggregation needed)
+            return response.series
 
         except InvalidApiResponseException as err:
             error_msg = str(err)
@@ -344,104 +338,6 @@ class HelenStatisticsManager:
                 exc_info=True,
             )
             raise
-
-    def _aggregate_to_hourly(
-        self, quarter_series: list[MeasurementsWithSpotPriceSeries]
-    ) -> list[MeasurementsWithSpotPriceSeries]:
-        """Aggregate 15-minute intervals to hourly intervals.
-
-        Args:
-            quarter_series: List of 15-minute measurement intervals
-
-        Returns:
-            List of hourly measurement intervals with summed consumption and averaged prices
-        """
-        # Group intervals by hour
-        hourly_data = defaultdict(list)
-
-        for entry in quarter_series:
-            try:
-                # Parse timestamp and normalize to UTC for consistent hour_key
-                entry_time = datetime.fromisoformat(entry.start)
-                # Convert to UTC to ensure consistent timezone across all runs
-                entry_time_utc = entry_time.astimezone(ZoneInfo("UTC"))
-                # Round down to the hour and strip microseconds for consistent keys
-                hour_start = entry_time_utc.replace(minute=0, second=0, microsecond=0)
-                hour_key = hour_start.isoformat()
-
-                hourly_data[hour_key].append(entry)
-            except Exception as err:
-                _LOGGER.warning(
-                    "Failed to parse timestamp %s during aggregation: %s", entry.start, err
-                )
-                continue
-
-        # Create hourly aggregated entries
-        hourly_series = []
-        for hour_key in sorted(hourly_data.keys()):
-            quarters = hourly_data[hour_key]
-
-            # Skip if we don't have exactly 4 quarters (incomplete or duplicate data)
-            if len(quarters) != 4:
-                if len(quarters) > 4:
-                    _LOGGER.warning(
-                        "Skipping hour %s with duplicate data (%d/4 quarters) - possible API issue",
-                        hour_key,
-                        len(quarters),
-                    )
-                else:
-                    _LOGGER.debug(
-                        "Skipping incomplete hour %s (only %d/4 quarters)",
-                        hour_key,
-                        len(quarters),
-                    )
-                continue
-
-            # Sum electricity consumption for the hour. A genuine zero-consumption
-            # hour must be preserved (not treated as missing) so it is imported as a
-            # zero-delta point rather than left as a permanent gap.
-            #
-            # IMPORTANT: Only aggregate if ALL quarters have data. Partial data
-            # (e.g., 3/4 quarters) creates incorrect totals and should be treated
-            # as pending/unavailable (return None).
-            electricity_values = [q.electricity for q in quarters]
-            if all(e is not None for e in electricity_values):
-                # All quarters have data - sum them
-                hourly_electricity = round(sum(electricity_values), 2)
-            else:
-                # Some quarters are null - hour is incomplete
-                _LOGGER.debug(
-                    "Skipping incomplete hour %s - only %d/4 quarters have electricity data: %s",
-                    hour_key,
-                    sum(1 for e in electricity_values if e is not None),
-                    electricity_values,
-                )
-                hourly_electricity = None
-
-            # Average spot prices for the hour (already includes VAT)
-            # IMPORTANT: Only average if ALL quarters have price data.
-            # Partial pricing data would create inaccurate hourly averages.
-            price_values = [q.electricity_spot_prices_vat for q in quarters]
-            if all(p is not None for p in price_values):
-                # All quarters have prices - average them
-                hourly_price = round(sum(price_values) / len(price_values), 4)
-            else:
-                # Some quarters lack prices - hour is incomplete
-                hourly_price = None
-
-            # Create hourly entry
-            # Note: We're reusing the MeasurementsWithSpotPriceSeries structure
-            # but with aggregated hourly values
-            hourly_entry = MeasurementsWithSpotPriceSeries(
-                start=hour_key,
-                stop=quarters[-1].stop,  # End of the last quarter
-                electricity=hourly_electricity,
-                electricity_spot_prices_vat=hourly_price,
-            )
-
-            hourly_series.append(hourly_entry)
-
-        return hourly_series
 
     async def _get_existing_statistics_in_window(
         self, statistic_id: str, start_time: datetime, end_time: datetime

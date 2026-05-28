@@ -115,118 +115,49 @@ class TestHelenStatisticsManager:
         assert manager._extract_spot_price_value(entry) is None
 
     async def test_fetch_interval_data(
-        self, hass: HomeAssistant, mock_api_client, mock_measurement_response
+        self, hass: HomeAssistant, mock_api_client
     ):
         """Test fetching hourly interval data from API."""
         manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
 
+        # Create mock hourly response (not quarters)
+        mock_hourly_response = Mock()
+        mock_hourly_response.series = [
+            Mock(
+                start="2024-05-15T10:00:00+03:00",
+                stop="2024-05-15T11:00:00+03:00",
+                electricity=2.0,
+                electricity_spot_prices_vat=500.0,
+            ),
+            Mock(
+                start="2024-05-15T11:00:00+03:00",
+                stop="2024-05-15T12:00:00+03:00",
+                electricity=1.5,
+                electricity_spot_prices_vat=450.0,
+            ),
+            Mock(
+                start="2024-05-15T12:00:00+03:00",
+                stop="2024-05-15T13:00:00+03:00",
+                electricity=1.8,
+                electricity_spot_prices_vat=475.0,
+            ),
+        ]
+        mock_hourly_response.resolution = "hour"
+        mock_hourly_response.missing_series = []
+
         # Create async mock for executor job
         async def async_return(func, *args, **kwargs):
-            return mock_measurement_response
+            return mock_hourly_response
 
         # Mock the API call
         with patch.object(hass, "async_add_executor_job", side_effect=async_return):
             series = await manager._fetch_interval_data()
 
-        # Verify we got the series data (3 hourly entries)
+        # Verify we got hourly data directly (no aggregation)
         assert len(series) == 3
         assert series[0].electricity == 2.0
-
-    def test_aggregate_to_hourly_preserves_zero_consumption(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """A genuine zero-consumption hour must be emitted, not dropped as missing."""
-        manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)"
-        )
-
-        helsinki_tz = ZoneInfo("Europe/Helsinki")
-        base = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
-        quarters = [
-            Mock(
-                start=(base + timedelta(minutes=15 * i)).isoformat(),
-                stop=(base + timedelta(minutes=15 * (i + 1))).isoformat(),
-                electricity=0.0,
-                electricity_spot_prices_vat=500.0,
-            )
-            for i in range(4)
-        ]
-
-        hourly = manager._aggregate_to_hourly(quarters)
-
-        assert len(hourly) == 1
-        # Zero is real data, not a gap -> preserved as 0.0 (was previously dropped to None)
-        assert hourly[0].electricity == 0.0
-
-    def test_aggregate_to_hourly_all_missing_is_none(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """An hour where every quarter lacks data stays None (a real gap)."""
-        manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)"
-        )
-
-        helsinki_tz = ZoneInfo("Europe/Helsinki")
-        base = datetime(2024, 5, 15, 11, 0, 0, tzinfo=helsinki_tz)
-        quarters = [
-            Mock(
-                start=(base + timedelta(minutes=15 * i)).isoformat(),
-                stop=(base + timedelta(minutes=15 * (i + 1))).isoformat(),
-                electricity=None,
-                electricity_spot_prices_vat=None,
-            )
-            for i in range(4)
-        ]
-
-        hourly = manager._aggregate_to_hourly(quarters)
-
-        assert len(hourly) == 1
-        assert hourly[0].electricity is None
-
-    def test_aggregate_to_hourly_partial_data_is_none(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """An hour with partial data (e.g., 3/4 quarters) returns None, not partial sum."""
-        manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)"
-        )
-
-        helsinki_tz = ZoneInfo("Europe/Helsinki")
-        base = datetime(2024, 5, 15, 12, 0, 0, tzinfo=helsinki_tz)
-        quarters = [
-            Mock(
-                start=(base + timedelta(minutes=15 * 0)).isoformat(),
-                stop=(base + timedelta(minutes=15 * 1)).isoformat(),
-                electricity=1.2,
-                electricity_spot_prices_vat=5.0,
-            ),
-            Mock(
-                start=(base + timedelta(minutes=15 * 1)).isoformat(),
-                stop=(base + timedelta(minutes=15 * 2)).isoformat(),
-                electricity=1.3,
-                electricity_spot_prices_vat=5.1,
-            ),
-            Mock(
-                start=(base + timedelta(minutes=15 * 2)).isoformat(),
-                stop=(base + timedelta(minutes=15 * 3)).isoformat(),
-                electricity=1.1,
-                electricity_spot_prices_vat=5.2,
-            ),
-            Mock(
-                start=(base + timedelta(minutes=15 * 3)).isoformat(),
-                stop=(base + timedelta(minutes=15 * 4)).isoformat(),
-                electricity=None,  # Last quarter missing (not yet published)
-                electricity_spot_prices_vat=5.3,  # But price is available (published in advance)
-            ),
-        ]
-
-        hourly = manager._aggregate_to_hourly(quarters)
-
-        assert len(hourly) == 1
-        # Partial electricity data should be None, not the sum of 3 quarters (3.6)
-        assert hourly[0].electricity is None
-        # Prices can still be averaged since all 4 quarters have prices
-        assert hourly[0].electricity_spot_prices_vat == 5.15
+        assert series[1].electricity == 1.5
+        assert series[2].electricity == 1.8
 
     async def test_get_existing_statistics_in_window(
         self, hass: HomeAssistant, mock_api_client

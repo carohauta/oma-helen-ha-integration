@@ -1,6 +1,6 @@
 [project]
 name = "oma-helen-ha-integration"
-version = "0.1.0"
+version = "2.1.0"
 description = "Home Assistant custom integration for Helen Energy electricity service"
 readme = "README.md"
 requires-python = ">=3.12"

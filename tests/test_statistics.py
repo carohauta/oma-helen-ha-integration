@@ -19,39 +19,6 @@ def mock_api_client():
     return mock_client
 
 
-@pytest.fixture
-def mock_measurement_series():
-    """Create mock 15-minute measurement series spanning 3 hours (12 quarters)."""
-    helsinki_tz = ZoneInfo("Europe/Helsinki")
-    base_time = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
-
-    series = []
-    # Create 12 x 15-minute entries (3 hours worth)
-    # Each quarter has 0.5 kWh, so 4 quarters = 2.0 kWh per hour
-    for i in range(12):
-        start_time = base_time + timedelta(minutes=15 * i)
-        series.append(
-            Mock(
-                start=start_time.isoformat(),
-                stop=(start_time + timedelta(minutes=15)).isoformat(),
-                electricity=0.5,  # 0.5 kWh per 15 minutes (2.0 kWh per hour)
-                electricity_spot_prices_vat=500.0,  # 5.00 EUR/kWh (cents, constant for test)
-            )
-        )
-
-    return series
-
-
-@pytest.fixture
-def mock_measurement_response(mock_measurement_series):
-    """Mock API response for 15-minute measurements."""
-    mock_response = Mock()
-    mock_response.series = mock_measurement_series
-    mock_response.resolution = "quarter"
-    mock_response.missing_series = []
-    return mock_response
-
-
 class TestHelenStatisticsManager:
     """Test the HelenStatisticsManager class."""
 

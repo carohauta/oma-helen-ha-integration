@@ -100,9 +100,20 @@ You can call actions from the UI in 'Developer Tools → Actions'. Look for `hel
 
 **Note:** Backfilling large date ranges (especially 6+ months) may take several minutes to complete. The service runs in the background, so you can continue using Home Assistant normally.
 
-### Examples
+### Displaying Your Energy Data
 
-Template sensor configuration examples. Use these template sensors if you wish to extract additional data from each sensor entity's attributes (unit price, daily average consumption etc.)
+**Primary Method: Energy Dashboard and Statistics Cards**
+
+The integration automatically imports hourly consumption and cost statistics into Home Assistant. To visualize this data, use Home Assistant's built-in cards:
+- **Energy Dashboard** (`Settings > Dashboards > Energy`) - Add `sensor.helen_monthly_consumption` to track consumption patterns
+- **Statistics Graph Card** - Display consumption and cost trends over time
+- **Energy Distribution Card** - Compare energy usage across different periods
+
+These built-in cards provide the most comprehensive and performant way to visualize your energy data.
+
+### Template Entity Examples (Optional)
+
+If you want to extract additional data from the sensor entity attributes (such as unit price, daily average consumption, or last month's values), you can create template sensors using the examples below.
 
 **Note**: If you have added multiple Helen Energy Price entries, adjust the entity names in the templates below to match your specific entity names (e.g., `sensor.helen_fixed_price_electricity_2` for the second entry).
 

@@ -96,7 +96,7 @@ You can call actions from the UI in 'Developer Tools → Actions'. Look for `hel
 **Limitations:**
 - Maximum backfill range: 365 days (1 year)
 - Always backfills from start_date to today
-- **Old statistics from before the start_date will always be cleared to ensure data consistency**
+- **All existing consumption/cost/fixed-cost statistics for the targeted contract(s) are cleared first, then rebuilt from `start_date` to today.** This is intentional — keeping the cumulative `sum` chain consistent prevents positive/negative spikes that would otherwise appear if rows were inserted mid-chain.
 
 **Note:** Backfilling large date ranges (especially 6+ months) may take several minutes to complete. The service runs in the background, so you can continue using Home Assistant normally.
 

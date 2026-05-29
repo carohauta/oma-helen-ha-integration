@@ -57,6 +57,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Creates `HelenDataCoordinator` with API clients, stored as `hass.data[DOMAIN][entry_id]["coordinator"]`
 - Triggers entity migration for first entry only
 - Registers/unregisters the `backfill_statistics` service (on first entry / last entry)
+- Registers `_async_reload_entry` as an `add_update_listener`, so option changes (via the OptionsFlow below) trigger an entry reload
 - Schema migration handled by HA core via the module-level `async_migrate_entry` (see migration.py)
 - Supports legacy YAML import (deprecated)
 
@@ -67,6 +68,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Required `custom_name` for the entry title (helps distinguish multiple contracts)
 - Delivery site selection (optional)
 - Generates unique IDs: `{username}_{delivery_site_id}` or `{username}_{timestamp}`
+- **`HelenOptionsFlow`** (wired via `async_get_options_flow`) lets users reconfigure VAT, contract type, transfer-costs, and default unit/base prices after setup; saved options are read via `conf()` and an option change triggers reload through the listener in `__init__.py`
 
 **`services.py`** - Integration services
 - Registers `helen_energy.backfill_statistics` (schema/UI in `services.yaml`)
@@ -85,6 +87,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 
 **`sensor.py`** - Sensor platform
 - `async_setup_entry` reads the coordinator from `hass.data` and builds the entity matching the contract type
+- `_assign_identity(entity, coordinator, sensor_type)` centralizes per-entry `unique_id` + display-name logic (first entry keeps the legacy name; later entries get a delivery-site-or-index suffix); all seven entity classes use it
 - **Sensor entities** (contract-type specific):
   - `HelenExchangeElectricity` - Exchange (spot) pricing
   - `HelenMarketPriceElectricity` - Market price
@@ -100,7 +103,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
     - `helen_energy:hourly_cost_spot_{suffix}` (cumulative EUR, spot/exchange price)
     - `helen_energy:hourly_cost_fixed_{suffix}` (cumulative EUR, fixed unit price — only when `fixed_unit_price` is set)
   - Two entry points share the same gap-fill logic (`_fill_gaps`):
-    - `import_recent_statistics()` — rolling 72h window, 15-min resolution aggregated to hourly (used by the coordinator)
+    - `import_recent_statistics()` — rolling 72h window, hourly resolution (used by the coordinator)
     - `backfill_statistics(start_date, end_date)` — custom range, hourly resolution (used by the service)
   - Backfills last 72 hours (hard-coded in `STATISTICS_BACKFILL_HOURS`) on the rolling path
   - **Gap detection**: queries existing statistics in the window and only imports missing timestamps
@@ -115,7 +118,9 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Legacy entity ID mappings in `LEGACY_ENTITY_MAPPINGS`
 
 **`utils.py`** - Shared helpers
-- `safe_round(value, decimals=2)` — used by both `sensor.py` and `statistics.py`
+- `safe_round(value, decimals=2)` — round-or-zero, used across the integration
+- `conf(config_entry, key, default=None)` — read a setting, preferring `entry.options` (reconfigurable via OptionsFlow) over `entry.data`, falling back to `default`
+- `get_entry_position(hass, config_entry)` — returns `(is_first_entry, zero-based index)` among Helen entries; drives per-entry naming in the coordinator and `_assign_identity`
 
 **`const.py`** - Constants and configuration keys
 - Domain: `helen_energy`
@@ -129,7 +134,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - `HelenApiClient` - Authentication, consumption data, contract info
 - `HelenPriceClient` - Spot/market/fixed pricing data
 - API response models: `MeasurementsWithSpotPriceResponse`, `MeasurementsWithSpotPriceSeries`
-- Resolution constants: `RESOLUTION_QUARTER` (15-min), `RESOLUTION_HOUR` (1-hour)
+- Resolution constant: `RESOLUTION_HOUR` (1-hour) — both the rolling 72h backfill and the ad-hoc service use this
 - Exceptions: `HelenAuthenticationException`, `InvalidDeliverySiteException`
 
 ### Data Flow
@@ -142,7 +147,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
    - Update `_fixed_unit_price` from API if not user-configured
    - Import statistics (always, after a successful fetch)
 3. **Statistics import** (gap-detection approach, in `_fill_gaps`):
-   - Fetch hourly series (rolling: 15-min `RESOLUTION_QUARTER` aggregated to hourly; backfill: `RESOLUTION_HOUR`)
+   - Fetch hourly series with `RESOLUTION_HOUR` (same call for rolling and backfill paths)
    - Query existing records over the data window from HA statistics
    - Detect gaps: hourly timestamps present in API data but absent in HA
    - Skip entries with `electricity=None` (pending, not gaps)
@@ -162,7 +167,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 **`HelenStatisticsManager` Key Methods**:
 
 1. **`import_recent_statistics()`** - Coordinator entry point
-   - Fetches 15-minute data via `_fetch_interval_data()` (aggregated to hourly), then delegates to `_fill_gaps()`
+   - Fetches hourly data via `_fetch_interval_data()`, then delegates to `_fill_gaps()`
 
 2. **`backfill_statistics(start_date, end_date)`** - Service entry point
    - Fetches the range at `RESOLUTION_HOUR`, then delegates to `_fill_gaps()`
@@ -175,32 +180,25 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 
 4. **`_fetch_interval_data()`** - Rolling-window data retrieval
    - Calculates date range from `STATISTICS_BACKFILL_HOURS` constant
-   - Calls API with `RESOLUTION_QUARTER` for 15-min data, aggregates via `_aggregate_to_hourly()`
+   - Calls the API with `RESOLUTION_HOUR` and returns the response series directly (no aggregation)
 
-5. **`_aggregate_to_hourly()`** - 15-min to hourly conversion
-   - Parses timestamps and converts to UTC
-   - Groups quarters by hour using `.replace(minute=0, second=0, microsecond=0)`
-   - Sums consumption (4 quarters, 2 decimals); averages spot prices (4 quarters, 4 decimals)
-   - Skips hours with != 4 quarters
-   - **Critical**: Uses UTC for hour_key to prevent duplicate entries
-
-6. **`_get_existing_statistics_in_window()`** - Query existing records in a time window
+5. **`_get_existing_statistics_in_window()`** - Query existing records in a time window
    - Uses `statistics_during_period()`; returns `dict[datetime, float]` of normalized UTC timestamps → cumulative sums
 
-7. **`_detect_gaps()`** - Find missing timestamps
+6. **`_detect_gaps()`** - Find missing timestamps
    - Returns only entries where the timestamp is absent AND `electricity` is not None (`None` = pending, not a gap)
 
-8. **`_build_statistics_for_gaps()`** - Cumulative calculation for gap filling
+7. **`_build_statistics_for_gaps()`** - Cumulative calculation for gap filling
    - For each gap, queries the cumulative value just before it via `_get_cumulative_at_or_before_timestamp()`
    - Consecutive gaps chain from the previous entry without a DB query; non-consecutive gaps each query
    - Returns `(consumption_stats, cost_stats, fixed_cost_stats)`; `fixed_cost_stats` empty when `fixed_unit_price` is None
 
-9. **`_get_cumulative_at_or_before_timestamp()`** - Point-in-time cumulative lookup
+8. **`_get_cumulative_at_or_before_timestamp()`** - Point-in-time cumulative lookup
    - Queries `statistics_during_period` from epoch to the timestamp; returns `(sum, timestamp)`
 
-10. **`_import_statistics(statistic_id, name, unit, unit_class, statistics)`** - Single import helper
-    - Builds `StatisticMetaData` (with version-aware `mean_type`/`has_mean`) and calls `async_add_external_statistics`
-    - One method for all three streams (consumption/spot/fixed)
+9. **`_import_statistics(statistic_id, name, unit, unit_class, statistics)`** - Single import helper
+   - Builds `StatisticMetaData` (with version-aware `mean_type`/`has_mean`) and calls `async_add_external_statistics`
+   - One method for all three streams (consumption/spot/fixed)
 
 ### Testing Considerations
 
@@ -211,9 +209,6 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Config flow tests: Test unique ID generation, entry data building
 - Migration: `tests/test_init.py::TestEntryMigration::test_v1_entry_migrates_to_v2` drives full setup of a v1 `MockConfigEntry` and asserts it ends at version 2
 - All tests must handle timezone conversions properly (Helsinki/UTC)
-- **Test fixtures** (`tests/test_statistics.py`):
-  - `mock_measurement_series`: 15-minute intervals (12 quarters = 3 hours, 0.5 kWh each, 500 cents/kWh)
-  - `mock_measurement_response`: Wraps `mock_measurement_series` in a mock API response object
 - **Gap detection tests**: Mock `_get_cumulative_at_or_before_timestamp` to control cumulative starting values; verify call count to confirm consecutive vs non-consecutive chaining
 - **End-to-end**: `test_fill_gaps_imports_all_three_streams` mocks `_get_existing_statistics_in_window` + `_get_cumulative_at_or_before_timestamp` and asserts all three streams import with correct per-stream metadata and cumulative sums
 - `HelenStatisticsManager` constructor in tests takes the `config_entry_id` + `config_entry_title` args; statistic IDs are suffixed accordingly (e.g. `helen_energy:hourly_energy_consumption_test_ent`)
@@ -230,21 +225,11 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Metadata `has_sum=True` for all three streams
 - Cost unit: `"EUR"` with `unit_class=None` (may need revisiting in HA 2026.11+)
 
-**15-Minute to Hourly Aggregation**:
-- API fetched with `RESOLUTION_QUARTER` (15-minute intervals)
-- Aggregation logic groups quarters by hour (UTC-normalized timestamps)
-- Consumption: Sum of 4 quarters, rounded to 2 decimals
-- Spot price: Average of 4 quarters, rounded to 4 decimals (cents/kWh → EUR/kWh)
-- Hours with != 4 quarters are skipped (incomplete data)
-- Rounding matches official Oma Helen app precision
-
 **Preventing Duplicate Statistics** (CRITICAL — now via gap detection):
-- Timestamps MUST be normalized: `.replace(minute=0, second=0, microsecond=0)`
+- Timestamps MUST be normalized: convert to UTC, then `.replace(minute=0, second=0, microsecond=0)`
 - Query existing statistics across the full 72-hour window using `statistics_during_period`
 - Only write records for timestamps missing from existing statistics
 - Gap detection replaces the old "skip timestamp <= last_known" approach
-- Hour keys during aggregation MUST use UTC to ensure consistency
-- Example bug: Different timezone formats ("+03:00" vs "Z") create duplicate hour_keys
 
 **Pending vs Gap distinction**:
 - API can return entries with `electricity=None` for recent hours (data not yet available)
@@ -279,21 +264,6 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - **Symptom**: Multiple statistics entries for the same hour with different cumulative values
 - **Root cause**: Timestamps not normalized (different microseconds, timezone formats)
 - **Fix**: Always `.replace(minute=0, second=0, microsecond=0)` and convert to UTC
-
-**Rounding Discrepancies**:
-- **Symptom**: Energy Dashboard shows 1.43 kWh but official app shows 1.42 kWh
-- **Root cause**: Summing 15-min intervals with full float precision
-- **Fix**: Round aggregated hourly consumption to 2 decimals, prices to 4 decimals
-
-**Incomplete Hour Aggregation**:
-- **Symptom**: Hours with unusual high/low values (e.g., 89 kWh in one hour)
-- **Root cause**: Summing != 4 quarters or duplicate quarters
-- **Fix**: Skip hours where `len(quarters) != 4`, log warnings for > 4 quarters
-
-**Timezone Confusion in hour_key**:
-- **Symptom**: Duplicate hour entries with different timezone suffixes
-- **Root cause**: Using local time `.isoformat()` instead of UTC
-- **Fix**: Convert to UTC before creating hour_key during aggregation
 
 ### Home Assistant Version Compatibility
 

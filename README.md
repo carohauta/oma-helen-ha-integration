@@ -59,10 +59,10 @@ If you have chosen to include the transfer costs you will also see the following
 
 The `state` of the entity shows the total energy transfer costs for the ongoing month. The price is presented in EUR and it includes the base price of your transfer contract. If Helen is not your energy transfer company, this entity does not serve a purpose and shows a default value of `0.0`.
 
-The integration also supports HA energy dashboard via the following entity:
+You may also see the following legacy entity:
 - sensor.helen_monthly_consumption
 
-The `state` of the sensor is the total energy consumption (in kWh) of the ongoing month.
+The `state` of this sensor is the total energy consumption (in kWh) of the ongoing month. **Note:** This sensor is now legacy. For energy dashboard integration, use the automatically imported hourly statistics instead (see "Energy Dashboard Integration" section below).
 
 ### Energy Dashboard Integration
 
@@ -105,11 +105,11 @@ You can call actions from the UI in 'Developer Tools → Actions'. Look for `hel
 **Primary Method: Energy Dashboard and Statistics Cards**
 
 The integration automatically imports hourly consumption and cost statistics into Home Assistant. To visualize this data, use Home Assistant's built-in cards:
-- **Energy Dashboard** (`Settings > Dashboards > Energy`) - Add `sensor.helen_monthly_consumption` to track consumption patterns
-- **Statistics Graph Card** - Display consumption and cost trends over time
+- **Energy Dashboard** (`Settings > Dashboards > Energy`) - Add the Helen Energy consumption statistic (search for your config entry title, e.g., "Helen Energy (Home) - Consumption") to track detailed hourly consumption patterns
+- **Statistics Graph Card** - Display consumption and cost trends over time using the imported statistics
 - **Energy Distribution Card** - Compare energy usage across different periods
 
-These built-in cards provide the most comprehensive and performant way to visualize your energy data.
+These built-in cards provide the most comprehensive and performant way to visualize your energy data. The statistics offer hour-by-hour granularity, unlike the legacy `sensor.helen_monthly_consumption` which only provides monthly totals.
 
 ### Template Entity Examples (Optional)
 

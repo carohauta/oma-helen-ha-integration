@@ -284,6 +284,22 @@ class HelenStatisticsManager:
         end_date = date.today()
         start_date = end_date - timedelta(days=STATISTICS_BACKFILL_HOURS // 24 + 1)
 
+        # Clamp to contract start so new users (<72h old contract) get partial data
+        # instead of a 403 for the pre-contract portion of the window
+        try:
+            contract_start = await self.hass.async_add_executor_job(
+                self.api_client.get_contract_start_date
+            )
+            if contract_start > start_date:
+                _LOGGER.debug(
+                    "Contract started %s; clamping fetch window from %s to contract start",
+                    contract_start,
+                    start_date,
+                )
+                start_date = contract_start
+        except Exception as err:
+            _LOGGER.debug("Could not get contract start date, using default window: %s", err)
+
         _LOGGER.debug(
             "Fetching hourly interval data from %s to %s", start_date, end_date
         )

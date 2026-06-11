@@ -209,21 +209,18 @@ class HelenStatisticsManager:
         contract_start = await self.hass.async_add_executor_job(
             self.api_client.get_contract_start_date
         )
-        if contract_start is not None and contract_start > start_date:
-            _LOGGER.info(
-                "Clamping backfill start from %s to contract start %s",
-                start_date,
-                contract_start,
-            )
-            start_date = contract_start
 
+        # Only prevent fetch if BOTH dates are before contract start
         if contract_start is not None and contract_start > end_date:
             _LOGGER.warning(
-                "Backfill end date %s is before contract start %s, nothing to fetch",
+                "Backfill period (%s to %s) is entirely before contract start %s - no data available",
+                start_date,
                 end_date,
                 contract_start,
             )
             return
+
+        # API will handle partial overlap (contract started during the range)
 
         try:
             # Fetch hourly data from API
@@ -309,13 +306,18 @@ class HelenStatisticsManager:
             contract_start = await self.hass.async_add_executor_job(
                 self.api_client.get_contract_start_date
             )
-            if contract_start is not None and contract_start > start_date:
+
+            # Only prevent fetch if BOTH dates are before contract start
+            if contract_start is not None and contract_start > end_date:
                 _LOGGER.debug(
-                    "Contract started %s; clamping fetch window from %s to contract start",
-                    contract_start,
+                    "Fetch window (%s to %s) is entirely before contract start %s - skipping",
                     start_date,
+                    end_date,
+                    contract_start,
                 )
-                start_date = contract_start
+                return
+
+            # API handles partial overlap
         except Exception as err:
             _LOGGER.debug("Could not get contract start date, using default window: %s", err)
 

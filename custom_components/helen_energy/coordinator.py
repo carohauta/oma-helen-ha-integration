@@ -14,7 +14,7 @@ from helenservice.utils import get_month_date_range_by_date
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import CONF_DEFAULT_UNIT_PRICE
+from .const import CONF_CONTRACT_START_DATE, CONF_DEFAULT_UNIT_PRICE
 from .statistics import HelenStatisticsManager
 from .utils import conf, get_entry_position, safe_round
 
@@ -131,6 +131,50 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             data["contract_type"] = await self.hass.async_add_executor_job(
                 self.api_client.get_contract_type
             )
+
+            # Detect contract changes
+            _LOGGER.debug("Fetching contract start date")
+            current_contract_start = await self.hass.async_add_executor_job(
+                self.api_client.get_contract_start_date
+            )
+
+            if current_contract_start is not None:
+                stored_contract_start = self.config_entry.data.get(
+                    CONF_CONTRACT_START_DATE
+                )
+
+                if stored_contract_start is None:
+                    # First run - store contract start silently
+                    _LOGGER.info("Initial contract start date: %s", current_contract_start)
+                    new_data = dict(self.config_entry.data)
+                    new_data[CONF_CONTRACT_START_DATE] = current_contract_start.isoformat()
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry, data=new_data
+                    )
+                else:
+                    # Parse stored date and check for renewal
+                    stored_date = date.fromisoformat(stored_contract_start)
+
+                    if (
+                        current_contract_start != stored_date
+                        and current_contract_start > stored_date
+                    ):
+                        _LOGGER.warning(
+                            "Contract renewal detected! Old start: %s, New start: %s",
+                            stored_date,
+                            current_contract_start,
+                        )
+                        # Update stored contract start
+                        new_data = dict(self.config_entry.data)
+                        new_data[
+                            CONF_CONTRACT_START_DATE
+                        ] = current_contract_start.isoformat()
+                        self.hass.config_entries.async_update_entry(
+                            self.config_entry, data=new_data
+                        )
+
+                # Store in data dict for debugging
+                data["contract_start_date"] = current_contract_start
 
             # Get prices based on contract type
             try:
@@ -293,19 +337,30 @@ async def _get_total_consumption_between_dates(
 async def _get_total_consumption_for_last_month(
     hass: HomeAssistant, helen_api_client: HelenApiClient
 ) -> float:
-    """Get total consumption for last month."""
+    """Get total consumption for last month.
+    
+    For renewals, the API returns historical data from previous contracts.
+    For new contracts, the API throws 403 if requesting dates before contract start.
+    """
     today_last_month = date.today() + relativedelta(months=-1)
     start_date, end_date = get_month_date_range_by_date(today_last_month)
 
-    contract_start = await hass.async_add_executor_job(
-        helen_api_client.get_contract_start_date
-    )
-    if contract_start is not None and contract_start > start_date:
-        return 0.0
-
-    return await _get_total_consumption_between_dates(
-        hass, helen_api_client, start_date, end_date
-    )
+    try:
+        return await _get_total_consumption_between_dates(
+            hass, helen_api_client, start_date, end_date
+        )
+    except InvalidApiResponseException as err:
+        # New contracts: no data exists before contract start
+        # Error: "No relevant contracts for delivery site in requested period"
+        if "no-relevant-contract" in str(err).lower():
+            _LOGGER.debug(
+                "No contract data available for last month (%s to %s) - likely a new contract",
+                start_date,
+                end_date,
+            )
+            return 0.0
+        # Other API errors: re-raise
+        raise
 
 
 async def _get_total_consumption_for_current_month(

@@ -76,11 +76,42 @@ class TestHelenDataCoordinator:
     async def test_last_month_consumption_zero_for_new_contract(
         self, hass: HomeAssistant, mock_config_entry, mock_api_setup
     ):
-        """When the contract started this month, last_month_consumption is 0 and no API call is made."""
+        """When the contract started this month, last_month_consumption is 0 after catching 403 error."""
         from datetime import date
+        from helenservice.api_exceptions import InvalidApiResponseException
+        from unittest.mock import Mock
 
         mock_api_client, _ = mock_api_setup
         mock_api_client.get_contract_start_date.return_value = date.today()
+        
+        # Simulate API 403 error for last month (no relevant contract)
+        def side_effect_for_last_month(*args, **kwargs):
+            # If it's calling for last month, raise the 403 error
+            from dateutil.relativedelta import relativedelta
+            from helenservice.utils import get_month_date_range_by_date
+            
+            today_last_month = date.today() + relativedelta(months=-1)
+            start_date, _ = get_month_date_range_by_date(today_last_month)
+            
+            if args[0] == start_date:
+                raise InvalidApiResponseException(
+                    'Helen chart-data request failed with status 403: '
+                    '{"type":"/problems/chart-data/no-relevant-contract",'
+                    '"title":"No relevant contracts for delivery site in requested period",'
+                    '"status":403}'
+                )
+            # For other calls, return mock response with valid data
+            return Mock(
+                series=[
+                    Mock(electricity=10.5),
+                    Mock(electricity=12.3),
+                    Mock(electricity=9.8),
+                ]
+            )
+
+        mock_api_client.get_daily_measurements_between_dates.side_effect = (
+            side_effect_for_last_month
+        )
 
         await _setup_entry(hass, mock_config_entry)
 
@@ -91,9 +122,9 @@ class TestHelenDataCoordinator:
         ]["coordinator"]
 
         assert coordinator.data["last_month_consumption"] == 0.0
-        # Without clamping: 3 calls (current_month, last_month, daily_avg).
-        # With clamping: 2 calls (last_month is skipped).
-        assert mock_api_client.get_daily_measurements_between_dates.call_count == 2
+        # New behavior: We try to call last_month (which raises 403), 
+        # catch the exception, and return 0.0. So all 3 calls are attempted.
+        assert mock_api_client.get_daily_measurements_between_dates.call_count == 3
 
 
 # ── TestHelenFixedPriceElectricity ────────────────────────────────────────────

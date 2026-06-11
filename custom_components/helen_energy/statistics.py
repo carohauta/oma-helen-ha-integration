@@ -290,7 +290,7 @@ class HelenStatisticsManager:
             contract_start = await self.hass.async_add_executor_job(
                 self.api_client.get_contract_start_date
             )
-            if contract_start > start_date:
+            if contract_start is not None and contract_start > start_date:
                 _LOGGER.debug(
                     "Contract started %s; clamping fetch window from %s to contract start",
                     contract_start,

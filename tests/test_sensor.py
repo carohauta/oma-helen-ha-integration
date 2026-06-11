@@ -73,6 +73,28 @@ class TestHelenDataCoordinator:
         # Data should be preserved, not wiped
         assert result == initial_data
 
+    async def test_last_month_consumption_zero_for_new_contract(
+        self, hass: HomeAssistant, mock_config_entry, mock_api_setup
+    ):
+        """When the contract started this month, last_month_consumption is 0 and no API call is made."""
+        from datetime import date
+
+        mock_api_client, _ = mock_api_setup
+        mock_api_client.get_contract_start_date.return_value = date.today()
+
+        await _setup_entry(hass, mock_config_entry)
+
+        from custom_components.helen_energy.coordinator import HelenDataCoordinator
+
+        coordinator: HelenDataCoordinator = hass.data[DOMAIN][
+            mock_config_entry.entry_id
+        ]["coordinator"]
+
+        assert coordinator.data["last_month_consumption"] == 0.0
+        # Without clamping: 3 calls (current_month, last_month, daily_avg).
+        # With clamping: 2 calls (last_month is skipped).
+        assert mock_api_client.get_daily_measurements_between_dates.call_count == 2
+
 
 # ── TestHelenFixedPriceElectricity ────────────────────────────────────────────
 

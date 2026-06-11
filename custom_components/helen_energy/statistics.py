@@ -206,6 +206,25 @@ class HelenStatisticsManager:
             (end_date - start_date).days,
         )
 
+        contract_start = await self.hass.async_add_executor_job(
+            self.api_client.get_contract_start_date
+        )
+        if contract_start is not None and contract_start > start_date:
+            _LOGGER.info(
+                "Clamping backfill start from %s to contract start %s",
+                start_date,
+                contract_start,
+            )
+            start_date = contract_start
+
+        if contract_start is not None and contract_start > end_date:
+            _LOGGER.warning(
+                "Backfill end date %s is before contract start %s, nothing to fetch",
+                end_date,
+                contract_start,
+            )
+            return
+
         try:
             # Fetch hourly data from API
             response: MeasurementsWithSpotPriceResponse = (

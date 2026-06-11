@@ -1,5 +1,6 @@
 """Common test fixtures and helpers for Helen Energy integration."""
 
+from datetime import date
 from unittest.mock import Mock, patch
 
 import pytest
@@ -25,6 +26,7 @@ def mock_helen_api_client():
     mock_client.login_and_init = Mock()
     mock_client.select_delivery_site_if_valid_id = Mock()
     mock_client.close = Mock()
+    mock_client.get_contract_start_date.return_value = date(2020, 1, 1)
     mock_client.get_contract_base_price.return_value = 5.0
     mock_client.get_contract_type.return_value = "PERUS"
     mock_client.get_contract_energy_unit_price.return_value = 8.5

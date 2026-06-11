@@ -292,10 +292,17 @@ async def _get_total_consumption_between_dates(
 
 async def _get_total_consumption_for_last_month(
     hass: HomeAssistant, helen_api_client: HelenApiClient
-):
+) -> float:
     """Get total consumption for last month."""
     today_last_month = date.today() + relativedelta(months=-1)
     start_date, end_date = get_month_date_range_by_date(today_last_month)
+
+    contract_start = await hass.async_add_executor_job(
+        helen_api_client.get_contract_start_date
+    )
+    if contract_start is not None and contract_start > start_date:
+        return 0.0
+
     return await _get_total_consumption_between_dates(
         hass, helen_api_client, start_date, end_date
     )

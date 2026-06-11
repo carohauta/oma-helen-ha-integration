@@ -260,4 +260,7 @@ ha_dev/
 
 # Generated documentation files
 README.html
+
+# AI
 .claude/
+.serena/

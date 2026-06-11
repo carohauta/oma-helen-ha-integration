@@ -98,9 +98,19 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         if statistic_ids:
             recorder = get_instance(hass)
             _LOGGER.info("Clearing existing statistics: %s", statistic_ids)
-            recorder.async_clear_statistics(statistic_ids)
-            # Wait a moment for the clear operation to complete
-            await asyncio.sleep(1)
+            # Create an event to wait for the clear operation to complete
+            clear_done = asyncio.Event()
+            recorder.async_clear_statistics(
+                statistic_ids, on_done=clear_done.set
+            )
+            # Wait for the recorder to finish clearing (max 10 seconds)
+            try:
+                await asyncio.wait_for(clear_done.wait(), timeout=10.0)
+                _LOGGER.debug("Statistics cleared successfully")
+            except asyncio.TimeoutError:
+                _LOGGER.warning(
+                    "Timeout waiting for statistics to clear, proceeding anyway"
+                )
 
         # Execute backfill for each coordinator
         success_count = 0

@@ -225,10 +225,22 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                     self.api_client.calculate_total_costs_by_spot_prices_between_dates,
                     *get_month_date_range_by_date(current_month),
                 )
-                last_month_cost = await self.hass.async_add_executor_job(
-                    self.api_client.calculate_total_costs_by_spot_prices_between_dates,
-                    *get_month_date_range_by_date(last_month),
-                )
+
+                # Try to fetch last month cost, but handle new contracts gracefully
+                try:
+                    last_month_cost = await self.hass.async_add_executor_job(
+                        self.api_client.calculate_total_costs_by_spot_prices_between_dates,
+                        *get_month_date_range_by_date(last_month),
+                    )
+                except InvalidApiResponseException as err:
+                    # New contracts: no data exists before contract start
+                    if "no-relevant-contract" in str(err).lower():
+                        _LOGGER.debug(
+                            "No contract data for last month exchange costs - likely a new contract"
+                        )
+                        last_month_cost = 0.0
+                    else:
+                        raise
 
                 data["exchange_costs"] = {
                     "current_month": safe_round(current_month_cost),

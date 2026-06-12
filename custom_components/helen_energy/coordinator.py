@@ -14,7 +14,13 @@ from helenservice.utils import get_month_date_range_by_date
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import CONF_CONTRACT_START_DATE, CONF_DEFAULT_UNIT_PRICE
+from .const import (
+    CONF_CONTRACT_START_DATE,
+    CONF_CONTRACT_TYPE,
+    CONF_DEFAULT_UNIT_PRICE,
+    CONTRACT_TYPE_EXCHANGE,
+    CONTRACT_TYPE_MARKET,
+)
 from .statistics import HelenStatisticsManager
 from .utils import conf, get_entry_position, safe_round
 
@@ -53,6 +59,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         self.credentials = credentials
         self.delivery_site_id = delivery_site_id
         self.include_transfer_costs = include_transfer_costs
+        self.contract_type = conf(config_entry, CONF_CONTRACT_TYPE)
 
         # Initialize statistics manager
         # Generate entity_id for monthly consumption sensor
@@ -77,7 +84,9 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         _LOGGER.debug(
             "Statistics manager initialized for %s (fixed_price=%s)",
             entity_id,
-            f"{config_fixed_unit_price} cents/kWh" if config_fixed_unit_price else "from API",
+            f"{config_fixed_unit_price} cents/kWh"
+            if config_fixed_unit_price
+            else "from API",
         )
 
     async def _async_update_data(self):
@@ -145,9 +154,13 @@ class HelenDataCoordinator(DataUpdateCoordinator):
 
                 if stored_contract_start is None:
                     # First run - store contract start silently
-                    _LOGGER.info("Initial contract start date: %s", current_contract_start)
+                    _LOGGER.info(
+                        "Initial contract start date: %s", current_contract_start
+                    )
                     new_data = dict(self.config_entry.data)
-                    new_data[CONF_CONTRACT_START_DATE] = current_contract_start.isoformat()
+                    new_data[CONF_CONTRACT_START_DATE] = (
+                        current_contract_start.isoformat()
+                    )
                     self.hass.config_entries.async_update_entry(
                         self.config_entry, data=new_data
                     )
@@ -166,9 +179,9 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                         )
                         # Update stored contract start
                         new_data = dict(self.config_entry.data)
-                        new_data[
-                            CONF_CONTRACT_START_DATE
-                        ] = current_contract_start.isoformat()
+                        new_data[CONF_CONTRACT_START_DATE] = (
+                            current_contract_start.isoformat()
+                        )
                         self.hass.config_entries.async_update_entry(
                             self.config_entry, data=new_data
                         )
@@ -186,81 +199,61 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Failed to get unit price: %s", e)
                 data["unit_price"] = None
 
-            # Get market prices if needed
-            try:
-                prices = await self.hass.async_add_executor_job(
-                    self.price_client.get_market_price_prices
-                )
-                if prices is not None:
-                    data["market_prices"] = {
-                        "last_month": getattr(prices, "last_month", None),
-                        "current_month": getattr(prices, "current_month", None),
-                        "next_month": getattr(prices, "next_month", None),
-                    }
-                else:
+            # Get market prices only for market contracts
+            if self.contract_type == CONTRACT_TYPE_MARKET:
+                try:
+                    prices = await self.hass.async_add_executor_job(
+                        self.price_client.get_market_price_prices
+                    )
+                    if prices is not None:
+                        data["market_prices"] = {
+                            "last_month": getattr(prices, "last_month", None),
+                            "current_month": getattr(prices, "current_month", None),
+                            "next_month": getattr(prices, "next_month", None),
+                        }
+                    else:
+                        data["market_prices"] = None
+                except (InvalidApiResponseException, AttributeError) as e:
+                    _LOGGER.debug("Failed to get market prices: %s", e)
                     data["market_prices"] = None
-            except (InvalidApiResponseException, AttributeError) as e:
-                _LOGGER.debug("Failed to get market prices: %s", e)
+            else:
                 data["market_prices"] = None
 
-            # Get exchange prices if needed
-            try:
-                exchange_prices = await self.hass.async_add_executor_job(
-                    self.price_client.get_exchange_prices
-                )
-                if exchange_prices is not None:
-                    data["exchange_prices"] = {"margin": exchange_prices.margin}
-                else:
-                    data["exchange_prices"] = None
-            except (InvalidApiResponseException, AttributeError) as e:
-                _LOGGER.debug("Failed to get exchange prices: %s", e)
-                data["exchange_prices"] = None
-
-            # Calculate spot price costs for exchange electricity
-            try:
-                current_month = date.today()
-                last_month = current_month + relativedelta(months=-1)
-
-                current_month_cost = await self.hass.async_add_executor_job(
-                    self.api_client.calculate_total_costs_by_spot_prices_between_dates,
-                    *get_month_date_range_by_date(current_month),
-                )
-
-                # Try to fetch last month cost, but handle new contracts gracefully
+            # Calculate spot price costs only for exchange electricity contracts
+            if self.contract_type == CONTRACT_TYPE_EXCHANGE:
                 try:
-                    last_month_cost = await self.hass.async_add_executor_job(
+                    current_month = date.today()
+                    last_month = current_month + relativedelta(months=-1)
+
+                    current_month_cost = await self.hass.async_add_executor_job(
                         self.api_client.calculate_total_costs_by_spot_prices_between_dates,
-                        *get_month_date_range_by_date(last_month),
+                        *get_month_date_range_by_date(current_month),
                     )
-                except InvalidApiResponseException as err:
-                    # New contracts: no data exists before contract start
-                    if "no-relevant-contract" in str(err).lower():
-                        _LOGGER.debug(
-                            "No contract data for last month exchange costs - likely a new contract"
+
+                    # Try to fetch last month cost, but handle new contracts gracefully
+                    try:
+                        last_month_cost = await self.hass.async_add_executor_job(
+                            self.api_client.calculate_total_costs_by_spot_prices_between_dates,
+                            *get_month_date_range_by_date(last_month),
                         )
-                        last_month_cost = 0.0
-                    else:
-                        raise
+                    except InvalidApiResponseException as err:
+                        # New contracts: no data exists before contract start
+                        if "no-relevant-contract" in str(err).lower():
+                            _LOGGER.debug(
+                                "No contract data for last month exchange costs - likely a new contract"
+                            )
+                            last_month_cost = 0.0
+                        else:
+                            raise
 
-                data["exchange_costs"] = {
-                    "current_month": safe_round(current_month_cost),
-                    "last_month": safe_round(last_month_cost),
-                }
-            except InvalidApiResponseException:
+                    data["exchange_costs"] = {
+                        "current_month": safe_round(current_month_cost),
+                        "last_month": safe_round(last_month_cost),
+                    }
+                except InvalidApiResponseException:
+                    data["exchange_costs"] = None
+            else:
                 data["exchange_costs"] = None
-
-            # Calculate smart guarantee costs
-            try:
-                current_month = date.today()
-                current_month_impact = await self.hass.async_add_executor_job(
-                    self.api_client.calculate_impact_of_usage_between_dates,
-                    *get_month_date_range_by_date(current_month),
-                )
-                data["smart_guarantee"] = {
-                    "current_month_impact": safe_round(current_month_impact),
-                }
-            except InvalidApiResponseException:
-                data["smart_guarantee"] = None
 
         except InvalidApiResponseException as err:
             if "authentication" in str(err).lower():
@@ -350,7 +343,7 @@ async def _get_total_consumption_for_last_month(
     hass: HomeAssistant, helen_api_client: HelenApiClient
 ) -> float:
     """Get total consumption for last month.
-    
+
     For renewals, the API returns historical data from previous contracts.
     For new contracts, the API throws 403 if requesting dates before contract start.
     """

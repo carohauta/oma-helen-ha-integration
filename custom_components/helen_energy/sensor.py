@@ -46,7 +46,6 @@ STATE_ATTR_CONTRACT_BASE_PRICE = "contract_base_price"
 
 # exchange
 STATE_ATTR_LAST_MONTH_PRICE_WITH_IMPACT = "last_month_price_with_impact"
-STATE_ATTR_CURRENT_MONTH_PRICE_WITH_IMPACT = "current_month_price_with_impact"
 
 # exchange and market price
 STATE_ATTR_LAST_MONTH_TOTAL_COST = "last_month_total_cost"
@@ -157,10 +156,6 @@ async def async_setup_entry(
                     "Default unit price set but will not be used with EXCHANGE contract"
                 )
             entities.append(HelenExchangeElectricity(coordinator, default_base_price))
-        elif api_contract_type is not None and "VALTTI" in api_contract_type:
-            entities.append(
-                HelenSmartGuarantee(coordinator, default_base_price, default_unit_price)
-            )
         else:
             # API contract type is None or unsupported - default to fixed price
             _LOGGER.warning(
@@ -374,76 +369,6 @@ class HelenExchangeElectricity(HelenBaseSensor):
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
             STATE_ATTR_LAST_MONTH_TOTAL_COST: last_month_total_cost,
-        }
-        attributes.update(self._get_consumption_attributes(data))
-        return attributes
-
-
-class HelenSmartGuarantee(HelenBaseSensor):
-    """Helen smart guarantee sensor."""
-
-    def __init__(
-        self,
-        coordinator: HelenDataCoordinator,
-        default_base_price: float | None = None,
-        default_unit_price: float | None = None,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(
-            coordinator,
-            "smart_guarantee",
-            default_base_price,
-            default_unit_price,
-        )
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the state of the sensor."""
-        if self.coordinator.data is None:
-            return None
-
-        data = self.coordinator.data
-        smart_guarantee = data.get("smart_guarantee")
-        if not smart_guarantee:
-            return None
-
-        base_price = self._get_base_price(data)
-        current_month_consumption = data.get("current_month_consumption", 0)
-        current_month_impact = smart_guarantee.get("current_month_impact", 0)
-        unit_price = self._get_unit_price(data)
-
-        current_month_energy_price_with_impact = (
-            unit_price + current_month_impact
-        ) / 100
-        current_month_total_cost = (
-            current_month_consumption * current_month_energy_price_with_impact
-            + base_price
-        )
-
-        return safe_round(current_month_total_cost)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        if self.coordinator.data is None:
-            return {}
-
-        data = self.coordinator.data
-        base_price = self._get_base_price(data)
-        smart_guarantee = data.get("smart_guarantee")
-
-        if not smart_guarantee:
-            return self._get_consumption_attributes(data)
-
-        unit_price = self._get_unit_price(data)
-        current_month_impact = smart_guarantee.get("current_month_impact", 0)
-        current_month_energy_price_with_impact = safe_round(
-            (unit_price + current_month_impact) / 100
-        )
-
-        attributes = {
-            STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
-            STATE_ATTR_CURRENT_MONTH_PRICE_WITH_IMPACT: current_month_energy_price_with_impact,
         }
         attributes.update(self._get_consumption_attributes(data))
         return attributes

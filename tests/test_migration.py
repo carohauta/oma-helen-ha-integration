@@ -19,7 +19,6 @@ class TestMigrationUtilities:
             get_legacy_entity_name("exchange_electricity")
             == "Helen Exchange Electricity"
         )
-        assert get_legacy_entity_name("smart_guarantee") == "Helen Smart Guarantee"
         assert (
             get_legacy_entity_name("fixed_price_electricity")
             == "Helen Fixed Price Electricity"
@@ -43,7 +42,6 @@ class TestLegacyEntityMappings:
         expected_entities = [
             "sensor.helen_market_price_electricity",
             "sensor.helen_exchange_electricity",
-            "sensor.helen_smart_guarantee",
             "sensor.helen_fixed_price_electricity",
             "sensor.helen_transfer_costs",
             "sensor.helen_monthly_consumption",
@@ -63,9 +61,6 @@ class TestLegacyEntityMappings:
         assert (
             LEGACY_ENTITY_MAPPINGS["sensor.helen_exchange_electricity"]
             == "exchange_electricity"
-        )
-        assert (
-            LEGACY_ENTITY_MAPPINGS["sensor.helen_smart_guarantee"] == "smart_guarantee"
         )
         assert (
             LEGACY_ENTITY_MAPPINGS["sensor.helen_fixed_price_electricity"]

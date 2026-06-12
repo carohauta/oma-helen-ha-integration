@@ -20,7 +20,6 @@ _LOGGER = logging.getLogger(__name__)
 LEGACY_ENTITY_MAPPINGS = {
     "sensor.helen_market_price_electricity": "market_price_electricity",
     "sensor.helen_exchange_electricity": "exchange_electricity",
-    "sensor.helen_smart_guarantee": "smart_guarantee",
     "sensor.helen_fixed_price_electricity": "fixed_price_electricity",
     "sensor.helen_transfer_costs": "transfer_costs",
     "sensor.helen_monthly_consumption": "monthly_consumption",
@@ -133,7 +132,6 @@ def get_legacy_entity_name(sensor_type: str) -> str:
     legacy_names = {
         "market_price_electricity": "Helen Market Price Electricity",
         "exchange_electricity": "Helen Exchange Electricity",
-        "smart_guarantee": "Helen Smart Guarantee",
         "fixed_price_electricity": "Helen Fixed Price Electricity",
         "transfer_costs": "Helen Transfer Costs",
         "monthly_consumption": "Helen Monthly Consumption",

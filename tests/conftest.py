@@ -121,9 +121,6 @@ def mock_coordinator_data():
             "current_month": 25.0,
             "last_month": 23.0,
         },
-        "smart_guarantee": {
-            "current_month_impact": 1.2,
-        },
     }
 
 

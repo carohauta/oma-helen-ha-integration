@@ -1,6 +1,6 @@
 [project]
 name = "oma-helen-ha-integration"
-version = "2.1.0"
+version = "2.2.0"
 description = "Home Assistant custom integration for Helen Energy electricity service"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -10,7 +10,7 @@ dependencies = []
 dev = [
     "pytest-homeassistant-custom-component==0.13.205",
     "responses>=0.22.0",
-    "oma-helen-cli==1.7.0",
+    "oma-helen-cli==1.8.0",
 ]
 
 [tool.uv]

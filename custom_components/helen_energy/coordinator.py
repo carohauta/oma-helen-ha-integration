@@ -22,7 +22,7 @@ from .const import (
     CONTRACT_TYPE_MARKET,
 )
 from .statistics import HelenStatisticsManager
-from .utils import conf, get_entry_position, safe_round
+from .utils import conf, get_entry_position, resolve_contract_type, safe_round
 
 if TYPE_CHECKING:
     from helenservice.api_response import MeasurementsWithSpotPriceResponse
@@ -199,8 +199,14 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Failed to get unit price: %s", e)
                 data["unit_price"] = None
 
+            # Resolve the effective contract type now that we have the API code.
+            # Handles the "automatic" user choice and any unrecognised codes.
+            effective_contract_type = resolve_contract_type(
+                self.contract_type, data.get("contract_type")
+            )
+
             # Get market prices only for market contracts
-            if self.contract_type == CONTRACT_TYPE_MARKET:
+            if effective_contract_type == CONTRACT_TYPE_MARKET:
                 try:
                     prices = await self.hass.async_add_executor_job(
                         self.price_client.get_market_price_prices
@@ -220,7 +226,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 data["market_prices"] = None
 
             # Calculate spot price costs only for exchange electricity contracts
-            if self.contract_type == CONTRACT_TYPE_EXCHANGE:
+            if effective_contract_type == CONTRACT_TYPE_EXCHANGE:
                 try:
                     current_month = date.today()
                     last_month = current_month + relativedelta(months=-1)

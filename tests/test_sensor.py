@@ -12,6 +12,7 @@ from custom_components.helen_energy.const import (
     CONF_DELIVERY_SITE_ID,
     CONF_INCLUDE_TRANSFER_COSTS,
     CONF_VAT,
+    CONTRACT_TYPE_AUTOMATIC,
     CONTRACT_TYPE_EXCHANGE,
     CONTRACT_TYPE_MARKET,
     DOMAIN,
@@ -355,3 +356,104 @@ class TestHelenMonthlyConsumption:
         state = hass.states.get("sensor.helen_monthly_consumption")
         assert state is not None
         assert state.attributes.get("unit_of_measurement") == "kWh"
+
+
+# ── TestAutomaticContractDetection ────────────────────────────────────────────
+
+
+class TestAutomaticContractDetection:
+    """Verify automatic contract type resolution end-to-end.
+
+    Regression coverage: when the user picks "automatic", the coordinator must still
+    fetch market_prices / exchange_costs based on the API contract type — otherwise
+    the corresponding sensor crashes on missing data.
+    """
+
+    async def test_automatic_market_contract_renders(
+        self, hass: HomeAssistant, mock_api_setup
+    ):
+        """User on automatic + API MARK contract gets a working market sensor."""
+        mock_helen_api_client, _ = mock_api_setup
+        mock_helen_api_client.get_contract_type.return_value = "MARKKINASAHKO"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                CONF_USERNAME: "testuser",
+                CONF_PASSWORD: "testpass",
+                CONF_VAT: 25.5,
+                CONF_INCLUDE_TRANSFER_COSTS: False,
+                CONF_DELIVERY_SITE_ID: None,
+                "contract_type": CONTRACT_TYPE_AUTOMATIC,
+            },
+            unique_id="testuser_auto_market",
+        )
+        await _setup_entry(hass, entry)
+
+        state = hass.states.get("sensor.helen_market_price_electricity")
+        assert state is not None
+        assert state.state == "53.91"
+
+    async def test_automatic_exchange_contract_renders(
+        self, hass: HomeAssistant, mock_api_setup
+    ):
+        """User on automatic + API PORS contract gets a working exchange sensor."""
+        mock_helen_api_client, _ = mock_api_setup
+        mock_helen_api_client.get_contract_type.return_value = "PORSSISAHKO"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                CONF_USERNAME: "testuser",
+                CONF_PASSWORD: "testpass",
+                CONF_VAT: 25.5,
+                CONF_INCLUDE_TRANSFER_COSTS: False,
+                CONF_DELIVERY_SITE_ID: None,
+                "contract_type": CONTRACT_TYPE_AUTOMATIC,
+            },
+            unique_id="testuser_auto_exchange",
+        )
+        await _setup_entry(hass, entry)
+
+        state = hass.states.get("sensor.helen_exchange_electricity")
+        assert state is not None
+        assert state.state == "30.5"
+
+
+# ── Market sensor None-price resilience ───────────────────────────────────────
+
+
+class TestHelenMarketPriceElectricityNoneHandling:
+    """The market price API can return None fields; the sensor must not crash."""
+
+    async def test_handles_none_price_fields(
+        self, hass: HomeAssistant, mock_api_setup
+    ):
+        """All price fields None → state is just the base price, no crash."""
+        _, mock_price_client = mock_api_setup
+        mock_price_client.get_market_price_prices.return_value.last_month = None
+        mock_price_client.get_market_price_prices.return_value.current_month = None
+        mock_price_client.get_market_price_prices.return_value.next_month = None
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                CONF_USERNAME: "testuser",
+                CONF_PASSWORD: "testpass",
+                CONF_VAT: 25.5,
+                CONF_INCLUDE_TRANSFER_COSTS: False,
+                CONF_DELIVERY_SITE_ID: None,
+                "contract_type": CONTRACT_TYPE_MARKET,
+            },
+            unique_id="testuser_market_none_prices",
+        )
+        await _setup_entry(hass, entry)
+
+        state = hass.states.get("sensor.helen_market_price_electricity")
+        assert state is not None
+        # All prices treated as 0 → only base_price (5.0) contributes
+        assert state.state == "5.0"
+        attrs = state.attributes
+        assert attrs["price_last_month"] is None
+        assert attrs["price_current_month"] is None
+        assert attrs["price_next_month"] is None

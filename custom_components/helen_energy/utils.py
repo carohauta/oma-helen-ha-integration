@@ -33,3 +33,30 @@ def get_entry_position(
 def conf(config_entry: ConfigEntry, key: str, default: Any = None) -> Any:
     """Read a setting, preferring options (reconfigurable) over the original data."""
     return config_entry.options.get(key, config_entry.data.get(key, default))
+
+
+def resolve_contract_type(
+    user_choice: str | None, api_contract_type: str | None
+) -> str:
+    """Resolve the effective contract type from the user's choice and API contract code.
+
+    The user can pick a concrete type (fixed/market/exchange) or "automatic", in which
+    case the type is derived from the Helen API contract code. Falls back to fixed when
+    the API code is missing or unrecognized.
+    """
+    from .const import (
+        CONTRACT_TYPE_EXCHANGE,
+        CONTRACT_TYPE_FIXED,
+        CONTRACT_TYPE_MARKET,
+    )
+
+    if user_choice in (CONTRACT_TYPE_FIXED, CONTRACT_TYPE_MARKET, CONTRACT_TYPE_EXCHANGE):
+        return user_choice
+    if api_contract_type:
+        if "PERUS" in api_contract_type or "KAYTTO" in api_contract_type:
+            return CONTRACT_TYPE_FIXED
+        if "MARK" in api_contract_type:
+            return CONTRACT_TYPE_MARKET
+        if "PORS" in api_contract_type:
+            return CONTRACT_TYPE_EXCHANGE
+    return CONTRACT_TYPE_FIXED

@@ -28,7 +28,7 @@ from .const import (
 )
 from .coordinator import HelenDataCoordinator
 from .migration import get_legacy_entity_name
-from .utils import conf, get_entry_position, safe_round
+from .utils import conf, get_entry_position, resolve_contract_type, safe_round
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -114,65 +114,41 @@ async def async_setup_entry(
 
     entities = []
 
-    # Determine which sensor to create based on user's choice
-    if user_contract_type == CONTRACT_TYPE_FIXED or is_fixed_price:
-        entities.append(
-            HelenFixedPriceElectricity(
-                coordinator, default_base_price, default_unit_price
-            )
+    api_contract_type = coordinator.data.get("contract_type")
+    if is_fixed_price:
+        effective_contract_type = CONTRACT_TYPE_FIXED
+    else:
+        effective_contract_type = resolve_contract_type(
+            user_contract_type, api_contract_type
         )
-    elif user_contract_type == CONTRACT_TYPE_MARKET:
+        # Warn when the user picked automatic and we couldn't recognise the API code
+        if (
+            user_contract_type == CONTRACT_TYPE_AUTOMATIC
+            and effective_contract_type == CONTRACT_TYPE_FIXED
+            and not (
+                api_contract_type
+                and ("PERUS" in api_contract_type or "KAYTTO" in api_contract_type)
+            )
+        ):
+            _LOGGER.warning(
+                "Contract type could not be determined from API (got: %s), "
+                "defaulting to fixed price sensor",
+                api_contract_type,
+            )
+
+    if effective_contract_type == CONTRACT_TYPE_MARKET:
         entities.append(
             HelenMarketPriceElectricity(
                 coordinator, default_base_price, default_unit_price
             )
         )
-    elif user_contract_type == CONTRACT_TYPE_EXCHANGE:
+    elif effective_contract_type == CONTRACT_TYPE_EXCHANGE:
         if default_unit_price is not None:
             _LOGGER.warning(
                 "Default unit price set but will not be used with EXCHANGE contract"
             )
         entities.append(HelenExchangeElectricity(coordinator, default_base_price))
-    elif user_contract_type == CONTRACT_TYPE_AUTOMATIC:
-        # Fall back to API-based detection for automatic mode
-        api_contract_type = coordinator.data.get("contract_type")
-        if api_contract_type is not None and (
-            "PERUS" in api_contract_type or "KAYTTO" in api_contract_type
-        ):
-            entities.append(
-                HelenFixedPriceElectricity(
-                    coordinator, default_base_price, default_unit_price
-                )
-            )
-        elif api_contract_type is not None and "MARK" in api_contract_type:
-            entities.append(
-                HelenMarketPriceElectricity(
-                    coordinator, default_base_price, default_unit_price
-                )
-            )
-        elif api_contract_type is not None and "PORS" in api_contract_type:
-            if default_unit_price is not None:
-                _LOGGER.warning(
-                    "Default unit price set but will not be used with EXCHANGE contract"
-                )
-            entities.append(HelenExchangeElectricity(coordinator, default_base_price))
-        else:
-            # API contract type is None or unsupported - default to fixed price
-            _LOGGER.warning(
-                "Contract type could not be determined from API (got: %s), defaulting to fixed price sensor",
-                api_contract_type,
-            )
-            entities.append(
-                HelenFixedPriceElectricity(
-                    coordinator, default_base_price, default_unit_price
-                )
-            )
     else:
-        # Unknown user contract type - shouldn't happen but default to fixed price
-        _LOGGER.warning(
-            "Unknown contract type selection '%s', defaulting to fixed price sensor",
-            user_contract_type,
-        )
         entities.append(
             HelenFixedPriceElectricity(
                 coordinator, default_base_price, default_unit_price
@@ -259,17 +235,17 @@ class HelenMarketPriceElectricity(HelenBaseSensor):
             return None
 
         data = self.coordinator.data
-        market_prices = data.get("market_prices", {})
+        market_prices = data.get("market_prices") or {}
         base_price = self._get_base_price(data)
         current_month_consumption = data.get("current_month_consumption", 0)
         daily_average_consumption = data.get("daily_average_consumption", 0)
 
-        # Calculate current month price estimate
-        current_month_price = (
-            self._default_unit_price / 100
-            if self._default_unit_price is not None
-            else market_prices.get("current_month", 0) / 100
-        )
+        # Calculate current month price estimate (cents → euros). Treat missing or
+        # None fields as 0 so a partial API response doesn't crash the sensor.
+        if self._default_unit_price is not None:
+            current_month_price = self._default_unit_price / 100
+        else:
+            current_month_price = (market_prices.get("current_month") or 0) / 100
 
         current_month_cost_estimate = (
             base_price
@@ -285,34 +261,38 @@ class HelenMarketPriceElectricity(HelenBaseSensor):
             return {}
 
         data = self.coordinator.data
-        market_prices = data.get("market_prices", {})
+        market_prices = data.get("market_prices") or {}
         base_price = self._get_base_price(data)
         last_month_consumption = data.get("last_month_consumption", 0)
 
-        # Calculate last month total cost
-        last_month_price = market_prices.get("last_month", 0) / 100
+        last_month_value = market_prices.get("last_month")
+        current_month_value = market_prices.get("current_month")
+        next_month_value = market_prices.get("next_month")
+
+        # Calculate last month total cost; treat missing price as 0 cents/kWh
+        last_month_price = (last_month_value or 0) / 100
         last_month_total_cost = safe_round(
             last_month_price * last_month_consumption + base_price
         )
 
         # Use default unit price for current month if set
-        current_month_price = (
+        current_month_price_attr = (
             self._default_unit_price
             if self._default_unit_price is not None
-            else market_prices.get("current_month")
+            else current_month_value
         )
 
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,
             STATE_ATTR_LAST_MONTH_TOTAL_COST: last_month_total_cost,
-            STATE_ATTR_PRICE_LAST_MONTH: safe_round(market_prices.get("last_month"))
-            if market_prices.get("last_month") is not None
+            STATE_ATTR_PRICE_LAST_MONTH: safe_round(last_month_value)
+            if last_month_value is not None
             else None,
-            STATE_ATTR_PRICE_CURRENT_MONTH: safe_round(current_month_price)
-            if current_month_price is not None
+            STATE_ATTR_PRICE_CURRENT_MONTH: safe_round(current_month_price_attr)
+            if current_month_price_attr is not None
             else None,
-            STATE_ATTR_PRICE_NEXT_MONTH: safe_round(market_prices.get("next_month"))
-            if market_prices.get("next_month") is not None
+            STATE_ATTR_PRICE_NEXT_MONTH: safe_round(next_month_value)
+            if next_month_value is not None
             else None,
         }
         attributes.update(self._get_consumption_attributes(data))

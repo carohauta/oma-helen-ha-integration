@@ -439,8 +439,8 @@ class HelenMonthlyConsumption(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:home-lightning-bolt"
 
     @property
-    def native_value(self) -> float:
+    def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if self.coordinator.data is None:
-            return 0
+            return None
         return safe_round(self.coordinator.data.get("current_month_consumption", 0))

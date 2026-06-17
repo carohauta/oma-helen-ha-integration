@@ -20,7 +20,8 @@ CONTRACT_TYPE_MARKET: Final = "market"
 CONTRACT_TYPE_EXCHANGE: Final = "exchange"
 
 # Statistics configuration
-STATISTICS_BACKFILL_HOURS: Final = 72  # Hard-coded, not user-configurable
+STATISTICS_BACKFILL_HOURS: Final = 168  # 7 days; headroom for Helen to backfill late hours
+STATISTICS_MAX_GAP_WAIT_HOURS: Final = 120  # 5 days; after this an empty hour is zero-filled to unblock the sum chain
 
 # Services
 SERVICE_BACKFILL_STATISTICS: Final = "backfill_statistics"

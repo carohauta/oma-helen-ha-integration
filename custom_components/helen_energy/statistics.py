@@ -86,11 +86,10 @@ class HelenStatisticsManager:
         self._fixed_unit_price = price
 
     async def import_recent_statistics(self) -> None:
-        """Import recent hourly statistics with gap detection and filling."""
+        """Extend the statistics chain with the latest hourly data from the API."""
         _LOGGER.debug("Starting statistics import for %s", self.entity_id)
 
         try:
-            # Fetch 15-minute interval data, aggregate to hourly, fill any gaps
             series = await self._fetch_interval_data()
             await self._write_statistics_chain(series)
         except Exception as err:
@@ -329,7 +328,7 @@ class HelenStatisticsManager:
         """Backfill statistics for a custom date range.
 
         Uses hourly API resolution (not quarter) for larger date ranges.
-        Only fills gaps - skips hours that already have statistics.
+        Rebuilds the full requested range, overwriting existing data.
 
         Args:
             start_date: First date to backfill (inclusive)

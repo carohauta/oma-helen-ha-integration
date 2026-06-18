@@ -226,7 +226,7 @@ class TestHelenStatisticsManager:
 
         assert mock_import.call_args[0][2] == test_statistics
 
-    async def test_fill_gaps_imports_all_three_streams(
+    async def test_write_statistics_chain_imports_all_three_streams(
         self, hass: HomeAssistant, mock_api_client
     ):
         """End-to-end: _fill_gaps detects gaps and imports all three streams."""

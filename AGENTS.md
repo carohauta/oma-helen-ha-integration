@@ -10,7 +10,7 @@ Key features:
 - Config flow UI for setup (legacy YAML migration supported)
 - Multiple contract types with automatic detection
 - Multiple config entries (e.g. several delivery sites/contracts), each with isolated statistics
-- Statistics import for HA Energy Dashboard (72-hour rolling backfill with gap detection)
+- Statistics import for HA Energy Dashboard (168-hour / 7-day rolling window, consecutive chain walk)
 - Ad-hoc `backfill_statistics` service for importing a custom historical date range
 - Transfer costs tracking (optional)
 - Entity ID migration for backward compatibility
@@ -73,7 +73,8 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 **`services.py`** - Integration services
 - Registers `helen_energy.backfill_statistics` (schema/UI in `services.yaml`)
 - Backfills a custom date range (`start_date` → today, max `MAX_BACKFILL_DAYS=365`); optional `config_entry_id` targets one contract, otherwise all
-- **Clears the affected statistic IDs first, then rebuilds** — intentional, so the cumulative `sum` chain stays consistent (inserting rows mid-chain would corrupt later sums)
+- Fetches the requested range first; only writes to the DB on success — a failed API call leaves existing statistics untouched
+- Uses rebuild mode: anchors on the last DB record before the range, overwrites the range via upsert; data outside the range is never touched
 - Delegates per-coordinator to `HelenStatisticsManager.backfill_statistics()`
 
 **`coordinator.py`** - Data update coordinator
@@ -97,17 +98,17 @@ find . -type d -name __pycache__ -exec rm -rf {} +
   - `HelenMonthlyConsumption` - Energy Dashboard integration
 
 **`statistics.py`** - External statistics manager
-- **`HelenStatisticsManager`**: Imports hourly statistics to HA database via gap detection
+- **`HelenStatisticsManager`**: Imports hourly statistics to HA database via a consecutive cumulative chain walk
   - Creates up to 3 statistic streams for Energy Dashboard, **suffixed per config entry** to avoid collisions across multiple contracts (suffix = `config_entry_id` hyphen-stripped, lowercased, first 8 chars):
     - `helen_energy:hourly_energy_consumption_{suffix}` (cumulative kWh)
     - `helen_energy:hourly_cost_spot_{suffix}` (cumulative EUR, spot/exchange price)
     - `helen_energy:hourly_cost_fixed_{suffix}` (cumulative EUR, fixed unit price — only when `fixed_unit_price` is set)
-  - Two entry points share the same gap-fill logic (`_fill_gaps`):
-    - `import_recent_statistics()` — rolling 72h window, hourly resolution (used by the coordinator)
-    - `backfill_statistics(start_date, end_date)` — custom range, hourly resolution (used by the service)
-  - Backfills last 72 hours (hard-coded in `STATISTICS_BACKFILL_HOURS`) on the rolling path
-  - **Gap detection**: queries existing statistics in the window and only imports missing timestamps
-  - **Pending data distinction**: missing API data (`electricity=None`) treated as pending, not as a fillable gap
+  - Two entry points share `_write_statistics_chain()` with different modes:
+    - `import_recent_statistics()` — extend mode, 168h (7-day) rolling window (used by the coordinator)
+    - `backfill_statistics(start_date, end_date)` — rebuild mode, custom range (used by the service)
+  - **Extend mode**: walks consecutively from `last_db_hour + 1h`; stops at missing recent hours, zero-fills hours older than `STATISTICS_MAX_GAP_WAIT_HOURS` (5 days) to unblock the chain
+  - **Rebuild mode**: anchors at the last DB record before the range (30-day lookback), overwrites the full range via upsert; data outside the range is never touched
+  - **Pending data**: API hours with `electricity=None` halt the walk (extend) or are zero-filled if stale (both modes)
   - Handles timezone conversion (Helsinki → UTC)
   - **Critical**: All timestamps normalized to UTC with microseconds stripped
   - Rounding: 2 decimals for consumption (kWh), 4 decimals for prices (EUR/kWh)
@@ -126,7 +127,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Domain: `helen_energy`
 - Contract types: automatic/fixed/market/exchange
 - `SERVICE_BACKFILL_STATISTICS`, `CONF_CUSTOM_NAME`
-- Statistics backfill: 72 hours (not user-configurable)
+- Statistics rolling window: 168 hours / 7 days (not user-configurable, set by `STATISTICS_BACKFILL_HOURS`)
 
 ### External Dependencies
 
@@ -134,7 +135,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - `HelenApiClient` - Authentication, consumption data, contract info
 - `HelenPriceClient` - Spot/market/fixed pricing data
 - API response models: `MeasurementsWithSpotPriceResponse`, `MeasurementsWithSpotPriceSeries`
-- Resolution constant: `RESOLUTION_HOUR` (1-hour) — both the rolling 72h backfill and the ad-hoc service use this
+- Resolution constant: `RESOLUTION_HOUR` (1-hour) — both the rolling window and the ad-hoc backfill service use this
 - Exceptions: `HelenAuthenticationException`, `InvalidDeliverySiteException`
 
 ### Data Flow
@@ -146,16 +147,12 @@ find . -type d -name __pycache__ -exec rm -rf {} +
    - Update sensor states and attributes
    - Update `_fixed_unit_price` from API if not user-configured
    - Import statistics (always, after a successful fetch)
-3. **Statistics import** (gap-detection approach, in `_fill_gaps`):
-   - Fetch hourly series with `RESOLUTION_HOUR` (same call for rolling and backfill paths)
-   - Query existing records over the data window from HA statistics
-   - Detect gaps: hourly timestamps present in API data but absent in HA
-   - Skip entries with `electricity=None` (pending, not gaps)
-   - For each gap: query cumulative sum just before it, build forward
-   - Chain consecutive gaps without extra DB queries
-   - Write the three streams via `_import_statistics` → `async_add_external_statistics`
+3. **Statistics import** (consecutive chain walk, in `_write_statistics_chain`):
+   - Fetch hourly series with `RESOLUTION_HOUR` (same call for both paths)
+   - **Extend mode** (incremental): query existing stats in the 7-day window; start walk from `last_db_hour + 1h`; stop at any missing recent hour; zero-fill hours older than 5 days
+   - **Rebuild mode** (backfill): query 30-day lookback before range for cumulative anchor; walk and upsert the full range
 
-4. **Ad-hoc backfill** (service): clear the contract's statistic IDs → `backfill_statistics(start_date, today)` → same `_fill_gaps` path rebuilds the chain from scratch.
+4. **Ad-hoc backfill** (service): `backfill_statistics(start_date, today)` → `_write_statistics_chain(rebuild=True)` — no statistics are cleared beforehand; API failure leaves DB untouched.
 
 ### Statistics Manager Implementation Details
 
@@ -167,33 +164,25 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 **`HelenStatisticsManager` Key Methods**:
 
 1. **`import_recent_statistics()`** - Coordinator entry point
-   - Fetches hourly data via `_fetch_interval_data()`, then delegates to `_fill_gaps()`
+   - Fetches hourly data via `_fetch_interval_data()`, then calls `_write_statistics_chain(series)`
+   - Extend mode: anchors at the last DB record in the window, appends new hours only
 
-2. **`backfill_statistics(start_date, end_date)`** - Service entry point
-   - Fetches the range at `RESOLUTION_HOUR`, then delegates to `_fill_gaps()`
+3. **`backfill_statistics(start_date, end_date)`** - Custom-range rebuild
+   - Fetches the range at `RESOLUTION_HOUR`, then calls `_write_statistics_chain(series, rebuild=True)`
+   - Rebuild mode: anchors at the last DB record *before* the range (30-day lookback), upserts the full range
 
-3. **`_fill_gaps(series)`** - Shared gap-fill core (used by both entry points)
-   - Queries existing records over the data window via `_get_existing_statistics_in_window()`
-   - Finds missing timestamps via `_detect_gaps()`
-   - Builds statistics for gaps only via `_build_statistics_for_gaps()`
-   - Imports the three streams via `_import_statistics()` (consumption + spot; fixed only when `fixed_unit_price` set)
+4. **`_write_statistics_chain(series, rebuild=False)`** - Core chain writer
+   - Builds `api_entries` dict (UTC hour → series entry)
+   - Queries existing stats to find the anchor cumulative (window query in extend, lookback query in rebuild)
+   - Walks hour-by-hour: missing recent hour → stop (extend) or zero-fill if older than `STATISTICS_MAX_GAP_WAIT_HOURS`
+   - Imports all three streams via `_import_statistics()`
 
-4. **`_fetch_interval_data()`** - Rolling-window data retrieval
-   - Calculates date range from `STATISTICS_BACKFILL_HOURS` constant
-   - Calls the API with `RESOLUTION_HOUR` and returns the response series directly (no aggregation)
+5. **`_get_existing_statistics_in_window()`** - DB window query
+   - Returns `{UTC datetime: cumulative_sum}` for a statistic ID in a time range
 
-5. **`_get_existing_statistics_in_window()`** - Query existing records in a time window
-   - Uses `statistics_during_period()`; returns `dict[datetime, float]` of normalized UTC timestamps → cumulative sums
+6. **`_import_statistics()`** - HA import wrapper
+   - Calls `async_add_external_statistics` with correct `StatisticMetaData`
 
-6. **`_detect_gaps()`** - Find missing timestamps
-   - Returns only entries where the timestamp is absent AND `electricity` is not None (`None` = pending, not a gap)
-
-7. **`_build_statistics_for_gaps()`** - Cumulative calculation for gap filling
-   - For each gap, queries the cumulative value just before it via `_get_cumulative_at_or_before_timestamp()`
-   - Consecutive gaps chain from the previous entry without a DB query; non-consecutive gaps each query
-   - Returns `(consumption_stats, cost_stats, fixed_cost_stats)`; `fixed_cost_stats` empty when `fixed_unit_price` is None
-
-8. **`_get_cumulative_at_or_before_timestamp()`** - Point-in-time cumulative lookup
    - Queries `statistics_during_period` from epoch to the timestamp; returns `(sum, timestamp)`
 
 9. **`_import_statistics(statistic_id, name, unit, unit_class, statistics)`** - Single import helper
@@ -209,8 +198,10 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Config flow tests: Test unique ID generation, entry data building
 - Migration: `tests/test_init.py::TestEntryMigration::test_v1_entry_migrates_to_v2` drives full setup of a v1 `MockConfigEntry` and asserts it ends at version 2
 - All tests must handle timezone conversions properly (Helsinki/UTC)
-- **Gap detection tests**: Mock `_get_cumulative_at_or_before_timestamp` to control cumulative starting values; verify call count to confirm consecutive vs non-consecutive chaining
-- **End-to-end**: `test_fill_gaps_imports_all_three_streams` mocks `_get_existing_statistics_in_window` + `_get_cumulative_at_or_before_timestamp` and asserts all three streams import with correct per-stream metadata and cumulative sums
+- **Chain extension tests**: mock `_get_existing_statistics_in_window` to seed DB state; assert cumulative sums start from the correct anchor
+- **End-to-end**: `test_write_statistics_chain_imports_all_three_streams` mocks `_get_existing_statistics_in_window` and asserts all three streams import with correct metadata and cumulative sums
+- **Rebuild mode tests**: verify anchor is taken from the lookback window (before the range), not from records inside the range
+
 - `HelenStatisticsManager` constructor in tests takes the `config_entry_id` + `config_entry_title` args; statistic IDs are suffixed accordingly (e.g. `helen_energy:hourly_energy_consumption_test_ent`)
 
 ### Important Implementation Details
@@ -225,16 +216,11 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Metadata `has_sum=True` for all three streams
 - Cost unit: `"EUR"` with `unit_class=None` (may need revisiting in HA 2026.11+)
 
-**Preventing Duplicate Statistics** (CRITICAL — now via gap detection):
-- Timestamps MUST be normalized: convert to UTC, then `.replace(minute=0, second=0, microsecond=0)`
-- Query existing statistics across the full 72-hour window using `statistics_during_period`
-- Only write records for timestamps missing from existing statistics
-- Gap detection replaces the old "skip timestamp <= last_known" approach
+**Preventing Duplicate Statistics** (CRITICAL — via consecutive chain walk):
 
-**Pending vs Gap distinction**:
-- API can return entries with `electricity=None` for recent hours (data not yet available)
-- `_detect_gaps()` treats `electricity=None` as pending, not as a fillable gap
-- Only timestamps with actual electricity data are counted as missing/gaps
+- Extend mode starts from `last_db_hour + 1h`, so already-imported hours are never written again
+- Rebuild mode uses upserts (`async_add_external_statistics` replaces existing records for the same timestamp), so re-running backfill for the same range is safe
+- API hours with `electricity=None` halt the walk — they are never written
 
 **Multiple Entries Support**:
 - Each entry gets a unique config-entry ID: `{username}_{delivery_site_id}` or `{username}_{timestamp}`
@@ -257,8 +243,8 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 
 **Duplicate Statistics on Restart**:
 - **Symptom**: Cumulative values grow by ~89 kWh on every HA restart
-- **Root cause**: Re-importing already-imported data without gap detection
-- **Fix**: Use `_get_existing_statistics_in_window()` + `_detect_gaps()` to only import missing timestamps
+- **Root cause**: cumulative chain jumping over missing hours, producing wrong base for subsequent records
+- **Fix**: consecutive walk from `last_db_hour + 1h` — the chain never jumps, and the anchor is always the last verified DB record
 
 **Inconsistent Timestamps**:
 - **Symptom**: Multiple statistics entries for the same hour with different cumulative values

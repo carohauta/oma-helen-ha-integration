@@ -262,7 +262,7 @@ class TestHelenStatisticsManager:
                 "custom_components.helen_energy.statistics.async_add_external_statistics"
             ) as mock_import,
         ):
-            await manager._fill_gaps(series)
+            await manager._write_statistics_chain(series)
 
         # Three streams imported: consumption, spot cost, fixed cost
         assert mock_import.call_count == 3
@@ -340,7 +340,7 @@ class TestHelenStatisticsManager:
                 "custom_components.helen_energy.statistics.async_add_external_statistics"
             ) as mock_import,
         ):
-            await manager._fill_gaps(series)
+            await manager._write_statistics_chain(series)
 
         # Find the consumption import
         cons_call = next(
@@ -409,7 +409,7 @@ class TestHelenStatisticsManager:
                 "custom_components.helen_energy.statistics.async_add_external_statistics"
             ) as mock_import,
         ):
-            await manager._fill_gaps(series)
+            await manager._write_statistics_chain(series)
 
         cons_call = next(
             c
@@ -469,7 +469,7 @@ class TestHelenStatisticsManager:
                 "custom_components.helen_energy.statistics.async_add_external_statistics"
             ) as mock_import,
         ):
-            await manager._fill_gaps(series)
+            await manager._write_statistics_chain(series)
 
         cons_call = next(
             c
@@ -521,6 +521,124 @@ class TestHelenStatisticsManager:
                 "custom_components.helen_energy.statistics.async_add_external_statistics"
             ) as mock_import,
         ):
-            await manager._fill_gaps(series)
+            await manager._write_statistics_chain(series)
 
         assert mock_import.call_count == 0
+
+    async def test_rebuild_mode_anchors_before_range(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Rebuild mode ignores DB records inside the range and anchors on the record before it."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        utc = ZoneInfo("UTC")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+
+        # The rebuild range starts 3 hours ago
+        range_start = now_hour - timedelta(hours=3)
+
+        # Anchor: a record 2 days before the range with cumulative = 500
+        anchor_hour = range_start - timedelta(days=2)
+
+        # Stale record inside the range (should be ignored as anchor)
+        stale_in_range = range_start + timedelta(hours=1)
+
+        def make(t_utc):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=1.0,
+                electricity_spot_prices_vat=100.0,
+            )
+
+        series = [make(range_start + timedelta(hours=i)) for i in range(3)]
+
+        def fake_existing(statistic_id, start, end):
+            # Lookback window (before range): return anchor
+            if end <= range_start:
+                return {anchor_hour: 500.0}
+            # Window inside range: return stale record (rebuild must not use this)
+            return {stale_in_range: 999.0}
+
+        async def async_fake_existing(statistic_id, start, end):
+            return fake_existing(statistic_id, start, end)
+
+        with (
+            patch.object(
+                manager,
+                "_get_existing_statistics_in_window",
+                side_effect=async_fake_existing,
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._write_statistics_chain(series, rebuild=True)
+
+        cons_call = next(
+            c
+            for c in mock_import.call_args_list
+            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            == manager.consumption_statistic_id
+        )
+        cons_stats = cons_call[0][2]
+        # Anchored at 500, 3 hours of 1.0 kWh each → 501, 502, 503
+        assert [s["sum"] for s in cons_stats] == [501.0, 502.0, 503.0]
+
+    async def test_rebuild_mode_starts_at_zero_when_no_anchor(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Rebuild with no prior data starts the cumulative chain at zero."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        utc = ZoneInfo("UTC")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        range_start = now_hour - timedelta(hours=2)
+
+        def make(t_utc):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=2.0,
+                electricity_spot_prices_vat=100.0,
+            )
+
+        series = [make(range_start + timedelta(hours=i)) for i in range(2)]
+
+        async def no_existing(statistic_id, start, end):
+            return {}
+
+        with (
+            patch.object(
+                manager, "_get_existing_statistics_in_window", side_effect=no_existing
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._write_statistics_chain(series, rebuild=True)
+
+        cons_call = next(
+            c
+            for c in mock_import.call_args_list
+            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            == manager.consumption_statistic_id
+        )
+        cons_stats = cons_call[0][2]
+        assert [s["sum"] for s in cons_stats] == [2.0, 4.0]

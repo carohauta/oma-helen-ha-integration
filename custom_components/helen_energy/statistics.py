@@ -92,7 +92,7 @@ class HelenStatisticsManager:
         try:
             # Fetch 15-minute interval data, aggregate to hourly, fill any gaps
             series = await self._fetch_interval_data()
-            await self._fill_gaps(series)
+            await self._write_statistics_chain(series)
         except Exception as err:
             _LOGGER.error(
                 "Error importing statistics for %s: %s",
@@ -102,15 +102,20 @@ class HelenStatisticsManager:
             )
             raise
 
-    async def _fill_gaps(
-        self, series: list[MeasurementsWithSpotPriceSeries]
+    async def _write_statistics_chain(
+        self,
+        series: list[MeasurementsWithSpotPriceSeries],
+        rebuild: bool = False,
     ) -> None:
-        """Extend the cumulative sum chain consecutively from the last DB record.
+        """Write the cumulative statistics chain from the given series.
 
-        Walks hour-by-hour from `last_db_hour + 1h` to the latest API hour. For each
-        missing hour: stops if recent (waits for Helen to backfill), or zero-fills if
-        older than STATISTICS_MAX_GAP_WAIT_HOURS to unblock the chain. This keeps the
-        sum strictly monotonic and rules out the negative-spike class of bugs.
+        In extend mode (default): anchors to the last DB record inside the API
+        window and appends only new hours after it.
+
+        In rebuild mode: anchors to the last DB record *before* the API window
+        (30-day lookback) and overwrites the full range via upsert. Used by the
+        backfill service so historical data outside the requested range is never
+        touched.
         """
         if not series:
             _LOGGER.warning("No interval data to process")
@@ -133,40 +138,77 @@ class HelenStatisticsManager:
 
         earliest_api = min(api_entries.keys())
         latest_api = max(api_entries.keys())
-
-        window_end = now_utc + timedelta(hours=1)
-        existing_consumption = await self._get_existing_statistics_in_window(
-            self.consumption_statistic_id, earliest_api, window_end
-        )
-        existing_cost = await self._get_existing_statistics_in_window(
-            self.cost_statistic_id, earliest_api, window_end
-        )
         has_fixed_price = self._fixed_unit_price is not None
-        existing_fixed_cost: dict[datetime, float] = {}
-        if has_fixed_price and self.fixed_cost_statistic_id:
-            existing_fixed_cost = await self._get_existing_statistics_in_window(
-                self.fixed_cost_statistic_id, earliest_api, window_end
+
+        if rebuild:
+            # Look back up to 30 days before the requested range to find the
+            # cumulative anchor. Records inside the range are intentionally
+            # ignored so the full range gets overwritten.
+            lookback_start = earliest_api - timedelta(days=30)
+            anchor_consumption = await self._get_existing_statistics_in_window(
+                self.consumption_statistic_id, lookback_start, earliest_api
             )
+            anchor_cost = await self._get_existing_statistics_in_window(
+                self.cost_statistic_id, lookback_start, earliest_api
+            )
+            anchor_fixed_cost: dict[datetime, float] = {}
+            if has_fixed_price and self.fixed_cost_statistic_id:
+                anchor_fixed_cost = await self._get_existing_statistics_in_window(
+                    self.fixed_cost_statistic_id, lookback_start, earliest_api
+                )
 
-        if existing_consumption:
-            last_db_hour = max(existing_consumption.keys())
-            cumulative_consumption = existing_consumption[last_db_hour]
-            cumulative_cost = existing_cost.get(last_db_hour, 0.0)
-            cumulative_fixed_cost = existing_fixed_cost.get(last_db_hour, 0.0)
-            walk_start = last_db_hour + timedelta(hours=1)
-        else:
-            cumulative_consumption = 0.0
-            cumulative_cost = 0.0
-            cumulative_fixed_cost = 0.0
+            if anchor_consumption:
+                anchor_hour = max(anchor_consumption.keys())
+                cumulative_consumption = anchor_consumption[anchor_hour]
+                cumulative_cost = anchor_cost.get(anchor_hour, 0.0)
+                cumulative_fixed_cost = anchor_fixed_cost.get(anchor_hour, 0.0)
+            else:
+                cumulative_consumption = 0.0
+                cumulative_cost = 0.0
+                cumulative_fixed_cost = 0.0
+
             walk_start = earliest_api
-
-        if walk_start > latest_api:
             _LOGGER.debug(
-                "Nothing to write: DB already up to %s, latest API hour is %s",
-                walk_start.isoformat(),
+                "Rebuild mode: anchored at %s (consumption=%.2f kWh), rewriting from %s to %s",
+                anchor_hour.isoformat() if anchor_consumption else "none",
+                cumulative_consumption,
+                earliest_api.isoformat(),
                 latest_api.isoformat(),
             )
-            return
+        else:
+            # Extend mode: continue from wherever the chain left off.
+            window_end = now_utc + timedelta(hours=1)
+            existing_consumption = await self._get_existing_statistics_in_window(
+                self.consumption_statistic_id, earliest_api, window_end
+            )
+            existing_cost = await self._get_existing_statistics_in_window(
+                self.cost_statistic_id, earliest_api, window_end
+            )
+            existing_fixed_cost: dict[datetime, float] = {}
+            if has_fixed_price and self.fixed_cost_statistic_id:
+                existing_fixed_cost = await self._get_existing_statistics_in_window(
+                    self.fixed_cost_statistic_id, earliest_api, window_end
+                )
+
+            if existing_consumption:
+                last_db_hour = max(existing_consumption.keys())
+                cumulative_consumption = existing_consumption[last_db_hour]
+                cumulative_cost = existing_cost.get(last_db_hour, 0.0)
+                cumulative_fixed_cost = existing_fixed_cost.get(last_db_hour, 0.0)
+                walk_start = last_db_hour + timedelta(hours=1)
+            else:
+                cumulative_consumption = 0.0
+                cumulative_cost = 0.0
+                cumulative_fixed_cost = 0.0
+                walk_start = earliest_api
+
+            if walk_start > latest_api:
+                _LOGGER.debug(
+                    "Nothing to write: DB already up to %s, latest API hour is %s",
+                    walk_start.isoformat(),
+                    latest_api.isoformat(),
+                )
+                return
 
         consumption_stats: list[StatisticData] = []
         cost_stats: list[StatisticData] = []
@@ -273,9 +315,10 @@ class HelenStatisticsManager:
             )
 
         _LOGGER.info(
-            "Wrote %d hour(s) for %s (fixed_cost=%s, zero_filled=%d)",
+            "Wrote %d hour(s) for %s (mode=%s, fixed_cost=%s, zero_filled=%d)",
             len(consumption_stats),
             self.entity_id,
+            "rebuild" if rebuild else "extend",
             "yes" if has_fixed_price and fixed_cost_stats else "no",
             zero_filled,
         )
@@ -343,7 +386,7 @@ class HelenStatisticsManager:
                     len(response.missing_series),
                 )
 
-            await self._fill_gaps(response.series)
+            await self._write_statistics_chain(response.series, rebuild=True)
 
         except InvalidApiResponseException as err:
             # Check if this is a "no relevant contract" error

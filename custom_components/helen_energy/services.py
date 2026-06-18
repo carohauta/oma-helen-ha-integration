@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date
 
 import voluptuous as vol
-from homeassistant.components.recorder import get_instance
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
@@ -81,42 +79,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 )
             else:
                 raise ServiceValidationError("No coordinators found")
-
-        # Collect statistics IDs from coordinators that will be backfilled
-        # Always clear statistics before backfilling to prevent cumulative chain issues
-        statistic_ids = []
-        for coordinator in coordinators:
-            if coordinator.statistics_manager:
-                statistic_ids.extend(
-                    [
-                        coordinator.statistics_manager.consumption_statistic_id,
-                        coordinator.statistics_manager.cost_statistic_id,
-                        coordinator.statistics_manager.fixed_cost_statistic_id,
-                    ]
-                )
-
-        if statistic_ids:
-            recorder = get_instance(hass)
-            _LOGGER.info("Clearing existing statistics: %s", statistic_ids)
-
-            # Create an event and thread-safe callback wrapper
-            clear_done = asyncio.Event()
-
-            def on_clear_complete() -> None:
-                """Signal completion from recorder thread to event loop."""
-                hass.loop.call_soon_threadsafe(clear_done.set)
-
-            recorder.async_clear_statistics(statistic_ids, on_done=on_clear_complete)
-
-            # Wait for the recorder to finish clearing (max 10 seconds)
-            try:
-                async with asyncio.timeout(10.0):
-                    await clear_done.wait()
-                _LOGGER.debug("Statistics cleared successfully")
-            except TimeoutError:
-                _LOGGER.warning(
-                    "Timeout waiting for statistics to clear, proceeding anyway"
-                )
 
         # Execute backfill for each coordinator
         success_count = 0

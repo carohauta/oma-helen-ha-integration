@@ -3,9 +3,10 @@ backfill_statistics:
   description: |
     Import historical electricity consumption and cost statistics from Helen API.
 
-    - Backfills from start_date to today
-    - Automatically clears existing statistics first
+    - Rebuilds statistics from start_date to today, overwriting any existing data in that range
+    - Data before start_date is never touched
     - Select a specific contract, or leave blank to backfill all contracts
+    - Note: if your fixed unit price has changed, running this will reprice the entire requested range using the current price
   fields:
     start_date:
       name: Start date

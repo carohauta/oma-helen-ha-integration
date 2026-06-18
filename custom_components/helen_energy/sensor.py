@@ -269,10 +269,10 @@ class HelenMarketPriceElectricity(HelenBaseSensor):
         current_month_value = market_prices.get("current_month")
         next_month_value = market_prices.get("next_month")
 
-        # Calculate last month total cost; treat missing price as 0 cents/kWh
-        last_month_price = (last_month_value or 0) / 100
-        last_month_total_cost = safe_round(
-            last_month_price * last_month_consumption + base_price
+        last_month_total_cost = (
+            safe_round(last_month_value / 100 * last_month_consumption + base_price)
+            if last_month_value is not None
+            else None
         )
 
         # Use default unit price for current month if set
@@ -343,8 +343,12 @@ class HelenExchangeElectricity(HelenBaseSensor):
         if not exchange_costs:
             return self._get_consumption_attributes(data)
 
-        last_month_cost = exchange_costs.get("last_month", 0)
-        last_month_total_cost = safe_round(last_month_cost + base_price)
+        last_month_cost = exchange_costs.get("last_month")
+        last_month_total_cost = (
+            safe_round(last_month_cost + base_price)
+            if last_month_cost is not None
+            else None
+        )
 
         attributes = {
             STATE_ATTR_CONTRACT_BASE_PRICE: base_price,

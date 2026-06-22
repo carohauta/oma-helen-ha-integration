@@ -108,8 +108,8 @@ class HelenStatisticsManager:
     ) -> None:
         """Write the cumulative statistics chain from the given series.
 
-        In extend mode (default): anchors to the last DB record inside the API
-        window and appends only new hours after it.
+        In extend mode (default): anchors to the last DB record before the first gap
+        inside the API window and (over)writes hours after it.
 
         In rebuild mode: anchors to the last DB record *before* the API window
         (30-day lookback) and overwrites the full range via upsert. Used by the
@@ -175,7 +175,7 @@ class HelenStatisticsManager:
                 latest_api.isoformat(),
             )
         else:
-            # Extend mode: continue from wherever the chain left off.
+            # Extend mode: start from first gap or continue from last entry.
             window_end = now_utc + timedelta(hours=1)
             existing_consumption = await self._get_existing_statistics_in_window(
                 self.consumption_statistic_id, earliest_api, window_end
@@ -190,11 +190,28 @@ class HelenStatisticsManager:
                 )
 
             if existing_consumption:
-                last_db_hour = max(existing_consumption.keys())
-                cumulative_consumption = existing_consumption[last_db_hour]
-                cumulative_cost = existing_cost.get(last_db_hour, 0.0)
-                cumulative_fixed_cost = existing_fixed_cost.get(last_db_hour, 0.0)
-                walk_start = last_db_hour + timedelta(hours=1)
+                hours = tuple(existing_consumption.keys())
+                first_zero_hour = None
+
+				# Find the first zero consumption hour with a previous hour
+                for prev_hour, curr_hour in zip(hours, hours[1:]):
+                    if existing_consumption[curr_hour] == 0.0:
+                        first_zero_hour = (prev_hour, curr_hour)
+                        break
+
+                if first_zero_hour is not None:
+                    # Get consumption and costs of previous hour
+                    cumulative_consumption = existing_consumption[first_zero_hour[0]]
+                    cumulative_cost = existing_cost.get(first_zero_hour[0], 0.0)
+                    cumulative_fixed_cost = existing_fixed_cost.get(first_zero_hour[0], 0.0)
+                    # Start filling from the first applicable zero consumption hour
+                    walk_start = first_zero_hour[1]
+                else:
+                    last_db_hour = max(existing_consumption.keys())
+                    cumulative_consumption = existing_consumption[last_db_hour]
+                    cumulative_cost = existing_cost.get(last_db_hour, 0.0)
+                    cumulative_fixed_cost = existing_fixed_cost.get(last_db_hour, 0.0)
+                    walk_start = last_db_hour + timedelta(hours=1)
             else:
                 cumulative_consumption = 0.0
                 cumulative_cost = 0.0
@@ -221,6 +238,10 @@ class HelenStatisticsManager:
             spot_price = self._extract_spot_price_value(entry) if entry else None
 
             if electricity is None or spot_price is None:
+                # Zero-fill gaps instead of stopping
+                electricity = 0.0
+                spot_price = 0.0
+                '''
                 age_hours = (now_utc - current_hour).total_seconds() / 3600
                 if age_hours > STATISTICS_MAX_GAP_WAIT_HOURS:
                     electricity = 0.0
@@ -240,6 +261,7 @@ class HelenStatisticsManager:
                         STATISTICS_MAX_GAP_WAIT_HOURS,
                     )
                     break
+                '''
 
             hourly_cost = electricity * spot_price
             hourly_fixed_cost = (

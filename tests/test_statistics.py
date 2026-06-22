@@ -363,10 +363,10 @@ class TestHelenStatisticsManager:
         # Spot price = 1.0 EUR/kWh, electricity = 1.0 kWh -> +1.0 per hour from 50.0
         assert [s["sum"] for s in cost_stats] == [51.0, 52.0, 53.0, 54.0]
 
-    async def test_fill_gaps_stops_at_recent_missing_hour(
+    async def test_zero_fills_gaps_up_to_latest_real_hour(
         self, hass: HomeAssistant, mock_api_client
     ):
-        """A missing hour within the wait window halts the walk; no later hours written."""
+        """Missing hours between walk_start and latest real hour are zero-filled; pending hours after are skipped."""
         manager = HelenStatisticsManager(
             hass,
             mock_api_client,
@@ -378,68 +378,7 @@ class TestHelenStatisticsManager:
         helsinki_tz = ZoneInfo("Europe/Helsinki")
         utc = ZoneInfo("UTC")
         now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
-        last_db_hour_utc = now_hour - timedelta(hours=4)
-
-        # API has data at hour +1 and +3, missing at +2 (which is recent)
-        def make(t_utc, electricity, spot):
-            t_hki = t_utc.astimezone(helsinki_tz)
-            return Mock(
-                start=t_hki.isoformat(),
-                stop=(t_hki + timedelta(hours=1)).isoformat(),
-                electricity=electricity,
-                electricity_spot_prices_vat=spot,
-            )
-
-        series = [
-            make(last_db_hour_utc + timedelta(hours=1), 1.0, 100.0),
-            # hour +2 missing entirely
-            make(last_db_hour_utc + timedelta(hours=3), 1.0, 100.0),
-        ]
-
-        existing = {manager.consumption_statistic_id: {last_db_hour_utc: 100.0}}
-
-        async def fake_existing(statistic_id, start, end):
-            return existing.get(statistic_id, {})
-
-        with (
-            patch.object(
-                manager, "_get_existing_statistics_in_window", side_effect=fake_existing
-            ),
-            patch(
-                "custom_components.helen_energy.statistics.async_add_external_statistics"
-            ) as mock_import,
-        ):
-            await manager._write_statistics_chain(series)
-
-        cons_call = next(
-            c
-            for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
-            == manager.consumption_statistic_id
-        )
-        cons_stats = cons_call[0][2]
-        # Only hour +1 written; walk stops at recent missing hour +2
-        assert [s["sum"] for s in cons_stats] == [101.0]
-
-    async def test_fill_gaps_zero_fills_old_missing_hour(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """A missing hour older than the wait threshold is zero-filled and the walk continues."""
-        from custom_components.helen_energy.const import STATISTICS_MAX_GAP_WAIT_HOURS
-
-        manager = HelenStatisticsManager(
-            hass,
-            mock_api_client,
-            "sensor.helen_monthly_consumption",
-            "test_entry_12345678",
-            "Helen Energy (test)",
-        )
-
-        helsinki_tz = ZoneInfo("Europe/Helsinki")
-        utc = ZoneInfo("UTC")
-        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
-        # Anchor far enough back that the missing hour is older than the threshold
-        last_db_hour_utc = now_hour - timedelta(hours=STATISTICS_MAX_GAP_WAIT_HOURS + 10)
+        last_db_hour_utc = now_hour - timedelta(hours=5)
 
         def make(t_utc, electricity, spot):
             t_hki = t_utc.astimezone(helsinki_tz)
@@ -450,10 +389,16 @@ class TestHelenStatisticsManager:
                 electricity_spot_prices_vat=spot,
             )
 
-        # Hour +1 has data, +2 missing (but very old → zero-fill), +3 has data again
+        # +1 real, +2 missing (gap), +3 real, +4 and +5 pending (None) — should stop at +3
         series = [
             make(last_db_hour_utc + timedelta(hours=1), 1.0, 100.0),
             make(last_db_hour_utc + timedelta(hours=3), 2.0, 100.0),
+            Mock(
+                start=(last_db_hour_utc + timedelta(hours=4)).astimezone(helsinki_tz).isoformat(),
+                stop=(last_db_hour_utc + timedelta(hours=5)).astimezone(helsinki_tz).isoformat(),
+                electricity=None,
+                electricity_spot_prices_vat=None,
+            ),
         ]
 
         existing = {manager.consumption_statistic_id: {last_db_hour_utc: 100.0}}
@@ -465,6 +410,7 @@ class TestHelenStatisticsManager:
             patch.object(
                 manager, "_get_existing_statistics_in_window", side_effect=fake_existing
             ),
+            patch.object(manager, "_repair_zero_filled_hours"),
             patch(
                 "custom_components.helen_energy.statistics.async_add_external_statistics"
             ) as mock_import,
@@ -478,8 +424,99 @@ class TestHelenStatisticsManager:
             == manager.consumption_statistic_id
         )
         cons_stats = cons_call[0][2]
-        # +1: 100 + 1 = 101, +2: zero-filled (no change), +3: 101 + 2 = 103
+        # +1: 101, +2: zero-filled (101), +3: 103 — stops here, pending +4 not written
         assert [s["sum"] for s in cons_stats] == [101.0, 101.0, 103.0]
+
+    async def test_repair_zero_filled_hours_applies_adjustments(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """_repair_zero_filled_hours calls async_adjust_statistics for each zero-filled hour with real API data."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        utc = ZoneInfo("UTC")
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        h1 = now_hour - timedelta(hours=3)
+        h2 = now_hour - timedelta(hours=2)
+        h3 = now_hour - timedelta(hours=1)
+
+        # DB: h1=100, h2=100 (zero-filled), h3=102 (real)
+        existing_consumption = {h1: 100.0, h2: 100.0, h3: 102.0}
+
+        def make(t_utc, electricity, spot):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=electricity,
+                electricity_spot_prices_vat=spot,
+            )
+
+        # API now has real data for h2 (1.5 kWh @ 0.10 EUR/kWh)
+        api_entries = {
+            h1: make(h1, 2.0, 100.0),
+            h2: make(h2, 1.5, 10.0),
+            h3: make(h3, 2.0, 100.0),
+        }
+
+        mock_recorder = Mock()
+        with patch(
+            "custom_components.helen_energy.statistics.get_instance",
+            return_value=mock_recorder,
+        ):
+            await manager._repair_zero_filled_hours(
+                api_entries, existing_consumption, False
+            )
+
+        # Should have adjusted consumption and cost for h2
+        adjust_calls = mock_recorder.async_adjust_statistics.call_args_list
+        consumption_calls = [c for c in adjust_calls if c[0][0] == manager.consumption_statistic_id]
+        cost_calls = [c for c in adjust_calls if c[0][0] == manager.cost_statistic_id]
+
+        assert len(consumption_calls) == 1
+        assert consumption_calls[0][0][1] == h2
+        assert consumption_calls[0][0][2] == pytest.approx(1.5)
+
+        assert len(cost_calls) == 1
+        assert cost_calls[0][0][1] == h2
+        assert cost_calls[0][0][2] == pytest.approx(0.15)  # 1.5 kWh * 0.10 EUR/kWh
+
+    async def test_repair_skips_hours_without_api_data(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """_repair_zero_filled_hours does nothing when the API still has no data for a zero-filled hour."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        utc = ZoneInfo("UTC")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        h1 = now_hour - timedelta(hours=2)
+        h2 = now_hour - timedelta(hours=1)
+
+        existing_consumption = {h1: 100.0, h2: 100.0}  # h2 zero-filled
+
+        mock_recorder = Mock()
+        with patch(
+            "custom_components.helen_energy.statistics.get_instance",
+            return_value=mock_recorder,
+        ):
+            # API still has nothing for h2
+            await manager._repair_zero_filled_hours(
+                {}, existing_consumption, False
+            )
+
+        mock_recorder.async_adjust_statistics.assert_not_called()
 
     async def test_fill_gaps_noop_when_db_already_caught_up(
         self, hass: HomeAssistant, mock_api_client

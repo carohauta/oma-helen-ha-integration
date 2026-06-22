@@ -29,7 +29,7 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, STATISTICS_BACKFILL_HOURS, STATISTICS_MAX_GAP_WAIT_HOURS
+from .const import DOMAIN, STATISTICS_BACKFILL_HOURS
 from .utils import safe_round
 
 _LOGGER = logging.getLogger(__name__)
@@ -108,8 +108,10 @@ class HelenStatisticsManager:
     ) -> None:
         """Write the cumulative statistics chain from the given series.
 
-        In extend mode (default): anchors to the last DB record inside the API
-        window and appends only new hours after it.
+        In extend mode (default): anchors to the last DB record in the window,
+        runs a repair pass to fix any previously zero-filled hours that now have
+        real API data, then walks to the latest real API hour zero-filling any
+        remaining gaps.
 
         In rebuild mode: anchors to the last DB record *before* the API window
         (30-day lookback) and overwrites the full range via upsert. Used by the
@@ -136,8 +138,21 @@ class HelenStatisticsManager:
             return
 
         earliest_api = min(api_entries.keys())
-        latest_api = max(api_entries.keys())
         has_fixed_price = self._fixed_unit_price is not None
+
+        # Find the latest hour that actually has real electricity data.
+        # Hours after this are pending — never written.
+        real_hours = [
+            h
+            for h, e in api_entries.items()
+            if self._extract_electricity_value(e) is not None
+        ]
+        if not real_hours:
+            _LOGGER.debug(
+                "No hours with real electricity data in API response, skipping"
+            )
+            return
+        latest_real_hour = max(real_hours)
 
         if rebuild:
             # Look back up to 30 days before the requested range to find the
@@ -172,10 +187,10 @@ class HelenStatisticsManager:
                 anchor_hour.isoformat() if anchor_consumption else "none",
                 cumulative_consumption,
                 earliest_api.isoformat(),
-                latest_api.isoformat(),
+                latest_real_hour.isoformat(),
             )
         else:
-            # Extend mode: continue from wherever the chain left off.
+            # Extend mode: query existing window, repair zero-filled hours, then extend.
             window_end = now_utc + timedelta(hours=1)
             existing_consumption = await self._get_existing_statistics_in_window(
                 self.consumption_statistic_id, earliest_api, window_end
@@ -189,6 +204,14 @@ class HelenStatisticsManager:
                     self.fixed_cost_statistic_id, earliest_api, window_end
                 )
 
+            # Repair pass: fix previously zero-filled hours that now have real data.
+            # A zero-filled hour shows as a zero delta (cumulative unchanged from prev hour).
+            await self._repair_zero_filled_hours(
+                api_entries,
+                existing_consumption,
+                has_fixed_price,
+            )
+
             if existing_consumption:
                 last_db_hour = max(existing_consumption.keys())
                 cumulative_consumption = existing_consumption[last_db_hour]
@@ -201,11 +224,11 @@ class HelenStatisticsManager:
                 cumulative_fixed_cost = 0.0
                 walk_start = earliest_api
 
-            if walk_start > latest_api:
+            if walk_start > latest_real_hour:
                 _LOGGER.debug(
-                    "Nothing to write: DB already up to %s, latest API hour is %s",
+                    "Nothing to write: DB already up to %s, latest real API hour is %s",
                     walk_start.isoformat(),
-                    latest_api.isoformat(),
+                    latest_real_hour.isoformat(),
                 )
                 return
 
@@ -215,31 +238,20 @@ class HelenStatisticsManager:
 
         zero_filled = 0
         current_hour = walk_start
-        while current_hour <= latest_api:
+        while current_hour <= latest_real_hour:
             entry = api_entries.get(current_hour)
             electricity = self._extract_electricity_value(entry) if entry else None
             spot_price = self._extract_spot_price_value(entry) if entry else None
 
             if electricity is None or spot_price is None:
-                age_hours = (now_utc - current_hour).total_seconds() / 3600
-                if age_hours > STATISTICS_MAX_GAP_WAIT_HOURS:
-                    electricity = 0.0
-                    spot_price = 0.0
-                    zero_filled += 1
-                    _LOGGER.warning(
-                        "Zero-filling %s for %s: no data after %.0fh wait",
-                        current_hour.isoformat(),
-                        self.entity_id,
-                        age_hours,
-                    )
-                else:
-                    _LOGGER.debug(
-                        "Stopping at %s: missing data (age=%.1fh, wait up to %dh)",
-                        current_hour.isoformat(),
-                        age_hours,
-                        STATISTICS_MAX_GAP_WAIT_HOURS,
-                    )
-                    break
+                electricity = 0.0
+                spot_price = 0.0
+                zero_filled += 1
+                _LOGGER.debug(
+                    "Zero-filling %s for %s: no data yet",
+                    current_hour.isoformat(),
+                    self.entity_id,
+                )
 
             hourly_cost = electricity * spot_price
             hourly_fixed_cost = (
@@ -322,9 +334,79 @@ class HelenStatisticsManager:
             zero_filled,
         )
 
-    async def backfill_statistics(
-        self, start_date: date, end_date: date
+    async def _repair_zero_filled_hours(
+        self,
+        api_entries: dict[datetime, MeasurementsWithSpotPriceSeries],
+        existing_consumption: dict[datetime, float],
+        has_fixed_price: bool,
     ) -> None:
+        """Adjust previously zero-filled hours that now have real API data.
+
+        A zero-filled hour leaves the cumulative sum unchanged from the previous
+        hour. When the API later delivers real data for that hour, we apply the
+        delta via async_adjust_statistics so HA cascades it to all later records.
+        Adjustments are applied earliest-first so each call is independent.
+        """
+        sorted_hours = sorted(existing_consumption.keys())
+        if len(sorted_hours) < 2:
+            return
+
+        recorder = get_instance(self.hass)
+        repaired = 0
+
+        for prev_hour, curr_hour in zip(sorted_hours, sorted_hours[1:]):
+            # Skip non-consecutive pairs (shouldn't happen, but be safe)
+            if curr_hour != prev_hour + timedelta(hours=1):
+                continue
+
+            delta = existing_consumption[curr_hour] - existing_consumption[prev_hour]
+            if delta != 0.0:
+                continue
+
+            # Cumulative didn't move — this hour was zero-filled.
+            # Check if API now has real data for it.
+            entry = api_entries.get(curr_hour)
+            if entry is None:
+                continue
+            electricity = self._extract_electricity_value(entry)
+            spot_price = self._extract_spot_price_value(entry)
+            if electricity is None or spot_price is None or electricity == 0.0:
+                continue
+
+            hourly_cost = electricity * spot_price
+            hourly_fixed_cost = (
+                electricity * (self._fixed_unit_price / 100.0)
+                if has_fixed_price
+                else 0.0
+            )
+
+            recorder.async_adjust_statistics(
+                self.consumption_statistic_id, curr_hour, electricity, "kWh"
+            )
+            recorder.async_adjust_statistics(
+                self.cost_statistic_id, curr_hour, hourly_cost, "EUR"
+            )
+            if has_fixed_price and self.fixed_cost_statistic_id:
+                recorder.async_adjust_statistics(
+                    self.fixed_cost_statistic_id, curr_hour, hourly_fixed_cost, "EUR"
+                )
+
+            repaired += 1
+            _LOGGER.info(
+                "Repaired zero-filled hour %s for %s: +%.3f kWh",
+                curr_hour.isoformat(),
+                self.entity_id,
+                electricity,
+            )
+
+        if repaired:
+            _LOGGER.info(
+                "Repaired %d zero-filled hour(s) for %s",
+                repaired,
+                self.entity_id,
+            )
+
+    async def backfill_statistics(self, start_date: date, end_date: date) -> None:
         """Backfill statistics for a custom date range.
 
         Uses hourly API resolution (not quarter) for larger date ranges.
@@ -390,7 +472,10 @@ class HelenStatisticsManager:
         except InvalidApiResponseException as err:
             # Check if this is a "no relevant contract" error
             error_msg = str(err)
-            if "no-relevant-contract" in error_msg.lower() or "no relevant contracts" in error_msg.lower():
+            if (
+                "no-relevant-contract" in error_msg.lower()
+                or "no relevant contracts" in error_msg.lower()
+            ):
                 _LOGGER.warning(
                     "Backfill failed for %s: Requested date range (%s to %s) is outside contract period",
                     self.entity_id,
@@ -455,7 +540,9 @@ class HelenStatisticsManager:
 
             # API handles partial overlap
         except Exception as err:
-            _LOGGER.debug("Could not get contract start date, using default window: %s", err)
+            _LOGGER.debug(
+                "Could not get contract start date, using default window: %s", err
+            )
 
         _LOGGER.debug(
             "Fetching hourly interval data from %s to %s", start_date, end_date
@@ -480,7 +567,8 @@ class HelenStatisticsManager:
 
             if response.missing_series:
                 _LOGGER.warning(
-                    "API reported %d missing hourly intervals", len(response.missing_series)
+                    "API reported %d missing hourly intervals",
+                    len(response.missing_series),
                 )
 
             # Return hourly data directly (no aggregation needed)
@@ -488,7 +576,10 @@ class HelenStatisticsManager:
 
         except InvalidApiResponseException as err:
             error_msg = str(err)
-            if "no-relevant-contract" in error_msg.lower() or "no relevant contracts" in error_msg.lower():
+            if (
+                "no-relevant-contract" in error_msg.lower()
+                or "no relevant contracts" in error_msg.lower()
+            ):
                 _LOGGER.warning(
                     "Cannot fetch interval data for %s: Date range outside contract period",
                     self.entity_id,

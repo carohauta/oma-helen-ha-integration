@@ -195,7 +195,7 @@ class HelenStatisticsManager:
 
 				# Find the first zero consumption hour with a previous hour
                 for prev_hour, curr_hour in zip(hours, hours[1:]):
-                    if existing_consumption[curr_hour] == 0.0:
+                    if existing_consumption[curr_hour] == existing_consumption[prev_hour]:
                         first_zero_hour = (prev_hour, curr_hour)
                         break
 
@@ -237,9 +237,10 @@ class HelenStatisticsManager:
             electricity = self._extract_electricity_value(entry) if entry else None
             spot_price = self._extract_spot_price_value(entry) if entry else None
 
-            if electricity is None or spot_price is None:
-                # Zero-fill gaps instead of stopping
+			# Zero-fill gaps instead of stopping
+            if electricity is None:
                 electricity = 0.0
+            if spot_price is None:
                 spot_price = 0.0
                 '''
                 age_hours = (now_utc - current_hour).total_seconds() / 3600

@@ -106,9 +106,10 @@ find . -type d -name __pycache__ -exec rm -rf {} +
   - Two entry points share `_write_statistics_chain()` with different modes:
     - `import_recent_statistics()` — extend mode, 168h (7-day) rolling window (used by the coordinator)
     - `backfill_statistics(start_date, end_date)` — rebuild mode, custom range (used by the service)
-  - **Extend mode**: walks consecutively from `last_db_hour + 1h`; stops at missing recent hours, zero-fills hours older than `STATISTICS_MAX_GAP_WAIT_HOURS` (5 days) to unblock the chain
+  - **Extend mode**: runs a repair pass first (see below), then walks from `last_db_hour + 1h` to `latest_real_api_hour`, zero-filling any gaps; pending hours beyond the latest real hour are never written
   - **Rebuild mode**: anchors at the last DB record before the range (30-day lookback), overwrites the full range via upsert; data outside the range is never touched
-  - **Pending data**: API hours with `electricity=None` halt the walk (extend) or are zero-filled if stale (both modes)
+  - **Repair pass** (`_repair_zero_filled_hours`): scans the DB window for zero-delta hours (cumulative unchanged from previous hour = previously zero-filled); for each hour where the API now has real data, calls `async_adjust_statistics` to cascade the correction forward
+  - **Pending data**: API hours with `electricity=None` are never written; the walk stops at the last real hour
   - Handles timezone conversion (Helsinki → UTC)
   - **Critical**: All timestamps normalized to UTC with microseconds stripped
   - Rounding: 2 decimals for consumption (kWh), 4 decimals for prices (EUR/kWh)
@@ -127,7 +128,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Domain: `helen_energy`
 - Contract types: automatic/fixed/market/exchange
 - `SERVICE_BACKFILL_STATISTICS`, `CONF_CUSTOM_NAME`
-- Statistics rolling window: 168 hours / 7 days (not user-configurable, set by `STATISTICS_BACKFILL_HOURS`)
+- Statistics rolling window: 168 hours / 7 days (not user-configurable, set by `STATISTICS_BACKFILL_HOURS`); hours that fall out of this window without real data are permanently zero-filled
 
 ### External Dependencies
 
@@ -149,7 +150,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
    - Import statistics (always, after a successful fetch)
 3. **Statistics import** (consecutive chain walk, in `_write_statistics_chain`):
    - Fetch hourly series with `RESOLUTION_HOUR` (same call for both paths)
-   - **Extend mode** (incremental): query existing stats in the 7-day window; start walk from `last_db_hour + 1h`; stop at any missing recent hour; zero-fill hours older than 5 days
+   - **Extend mode** (incremental): repair pass first; then walk from `last_db_hour + 1h` to `latest_real_api_hour`, zero-filling gaps; pending hours not written
    - **Rebuild mode** (backfill): query 30-day lookback before range for cumulative anchor; walk and upsert the full range
 
 4. **Ad-hoc backfill** (service): `backfill_statistics(start_date, today)` → `_write_statistics_chain(rebuild=True)` — no statistics are cleared beforehand; API failure leaves DB untouched.
@@ -172,15 +173,20 @@ find . -type d -name __pycache__ -exec rm -rf {} +
    - Rebuild mode: anchors at the last DB record *before* the range (30-day lookback), upserts the full range
 
 4. **`_write_statistics_chain(series, rebuild=False)`** - Core chain writer
-   - Builds `api_entries` dict (UTC hour → series entry)
-   - Queries existing stats to find the anchor cumulative (window query in extend, lookback query in rebuild)
-   - Walks hour-by-hour: missing recent hour → stop (extend) or zero-fill if older than `STATISTICS_MAX_GAP_WAIT_HOURS`
+   - Builds `api_entries` dict (UTC hour → series entry); finds `latest_real_api_hour`
+   - Extend: runs `_repair_zero_filled_hours`, then walks from `last_db_hour + 1h` to `latest_real_api_hour`, zero-filling any gaps
+   - Rebuild: anchors at last DB record before range, walks and upserts the full range
    - Imports all three streams via `_import_statistics()`
 
-5. **`_get_existing_statistics_in_window()`** - DB window query
+5. **`_repair_zero_filled_hours(api_entries, existing_consumption, has_fixed_price)`** - Auto-repair
+   - Detects zero-filled hours as consecutive DB records with equal cumulative sum
+   - For each such hour where API now has real data: calls `recorder.async_adjust_statistics` for all three streams
+   - HA cascades each adjustment to all subsequent records automatically
+
+6. **`_get_existing_statistics_in_window()`** - DB window query
    - Returns `{UTC datetime: cumulative_sum}` for a statistic ID in a time range
 
-6. **`_import_statistics()`** - HA import wrapper
+7. **`_import_statistics()`** - HA import wrapper
    - Calls `async_add_external_statistics` with correct `StatisticMetaData`
 
    - Queries `statistics_during_period` from epoch to the timestamp; returns `(sum, timestamp)`
@@ -199,7 +205,9 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Migration: `tests/test_init.py::TestEntryMigration::test_v1_entry_migrates_to_v2` drives full setup of a v1 `MockConfigEntry` and asserts it ends at version 2
 - All tests must handle timezone conversions properly (Helsinki/UTC)
 - **Chain extension tests**: mock `_get_existing_statistics_in_window` to seed DB state; assert cumulative sums start from the correct anchor
-- **End-to-end**: `test_write_statistics_chain_imports_all_three_streams` mocks `_get_existing_statistics_in_window` and asserts all three streams import with correct metadata and cumulative sums
+- **Zero-fill tests**: verify gaps between walk_start and `latest_real_hour` are zero-filled; verify pending hours beyond `latest_real_hour` are not written
+- **Repair pass tests**: mock `get_instance` recorder; assert `async_adjust_statistics` is called with correct deltas for previously zero-filled hours; assert no calls when API still has no data
+- **End-to-end**: `test_write_statistics_chain_imports_all_three_streams` asserts all three streams import with correct metadata and cumulative sums
 - **Rebuild mode tests**: verify anchor is taken from the lookback window (before the range), not from records inside the range
 
 - `HelenStatisticsManager` constructor in tests takes the `config_entry_id` + `config_entry_title` args; statistic IDs are suffixed accordingly (e.g. `helen_energy:hourly_energy_consumption_test_ent`)

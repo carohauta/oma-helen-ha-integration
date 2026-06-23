@@ -73,7 +73,7 @@ The integration automatically imports **hourly consumption statistics** into Hom
 - See cost breakdowns (spot prices, fixed prices, etc.)
 
 **Statistics are automatically enabled** for new installations. When you first set up the integration, it will:
-1. Automatically backfill the last **72 hours** of consumption data
+1. Automatically backfill the last **7 days** of consumption data
 2. Continue importing new hourly data as it becomes available from Helen's API
 
 The statistics include:
@@ -96,7 +96,8 @@ You can call actions from the UI in 'Developer Tools → Actions'. Look for `hel
 **Limitations:**
 - Maximum backfill range: 365 days (1 year)
 - Always backfills from start_date to today
-- **All existing consumption/cost/fixed-cost statistics for the targeted contract(s) are cleared first, then rebuilt from `start_date` to today.** This is intentional — keeping the cumulative `sum` chain consistent prevents positive/negative spikes that would otherwise appear if rows were inserted mid-chain.
+- Only the requested date range is rewritten; statistics outside that range (e.g., older history) are never touched
+- If your fixed unit price has changed, running backfill will reprice the entire requested range using the current price
 
 **Note:** Backfilling large date ranges (especially 6+ months) may take several minutes to complete. The service runs in the background, so you can continue using Home Assistant normally.
 

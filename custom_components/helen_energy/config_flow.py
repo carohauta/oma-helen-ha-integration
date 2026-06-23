@@ -45,10 +45,14 @@ def _contract_type_selector() -> selector.SelectSelector:
     return selector.SelectSelector(
         selector.SelectSelectorConfig(
             options=[
-                selector.SelectOptionDict(value=CONTRACT_TYPE_AUTOMATIC, label="automatic"),
+                selector.SelectOptionDict(
+                    value=CONTRACT_TYPE_AUTOMATIC, label="automatic"
+                ),
                 selector.SelectOptionDict(value=CONTRACT_TYPE_FIXED, label="fixed"),
                 selector.SelectOptionDict(value=CONTRACT_TYPE_MARKET, label="market"),
-                selector.SelectOptionDict(value=CONTRACT_TYPE_EXCHANGE, label="exchange"),
+                selector.SelectOptionDict(
+                    value=CONTRACT_TYPE_EXCHANGE, label="exchange"
+                ),
             ],
             mode="list",
             translation_key="contract_type",
@@ -183,7 +187,7 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return True, CONTRACT_TYPE_FIXED
             elif "MARK" in api_contract_type:
                 return True, CONTRACT_TYPE_MARKET
-            elif any(x in api_contract_type for x in ["PORS", "VALTTI"]):
+            elif any(x in api_contract_type for x in ["PORS"]):
                 return True, CONTRACT_TYPE_EXCHANGE
             else:
                 # Unsupported contract type - return raw API type for error message

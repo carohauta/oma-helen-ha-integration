@@ -4,7 +4,7 @@ This file provides detailed guidance for AI coding agents when working with code
 
 ## Project Overview
 
-Home Assistant custom integration for Helen Energy electricity service (Finland). Fetches electricity consumption, pricing, and costs from the Oma Helen API. Supports Exchange (spot), Market Price, Fixed Price, and Smart Guarantee (VALTTI) electricity contracts.
+Home Assistant custom integration for Helen Energy electricity service (Finland). Fetches electricity consumption, pricing, and costs from the Oma Helen API. Supports Exchange (spot), Market Price, and Fixed Price electricity contracts.
 
 Key features:
 - Config flow UI for setup (legacy YAML migration supported)
@@ -93,7 +93,6 @@ find . -type d -name __pycache__ -exec rm -rf {} +
   - `HelenExchangeElectricity` - Exchange (spot) pricing
   - `HelenMarketPriceElectricity` - Market price
   - `HelenFixedPriceElectricity` - Fixed price
-  - `HelenSmartGuarantee` - Smart guarantee / VALTTI contract
   - `HelenTransferPrice` - Transfer/delivery costs (optional)
   - `HelenMonthlyConsumption` - Energy Dashboard integration
 
@@ -238,7 +237,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Only first entry triggers entity migration
 
 **Contract Type Detection**:
-- Automatic mode validates against supported types: PERUS, KAYTTO, MARK, PORS, VALTTI
+- Automatic mode validates against supported types: PERUS, KAYTTO, MARK, PORS
 - Manual modes (fixed/market/exchange) skip validation
 - Automatic mode that can't resolve a supported type shows `automatic_detection_failed` with the detected type (`{detected_type}`), prompting manual selection
 

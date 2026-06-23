@@ -261,6 +261,18 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             else:
                 data["exchange_costs"] = None
 
+            # Retain last known values for consumption fields if the API returned
+            # empty series (partial failure) — avoids showing "unknown" on a
+            # transient gap in the measurements endpoint.
+            if self.data is not None:
+                for key in (
+                    "current_month_consumption",
+                    "last_month_consumption",
+                    "daily_average_consumption",
+                ):
+                    if data.get(key) is None and self.data.get(key) is not None:
+                        data[key] = self.data[key]
+
         except InvalidApiResponseException as err:
             if "authentication" in str(err).lower():
                 # Trigger reauth if it's an auth error
@@ -336,7 +348,7 @@ async def _get_total_consumption_between_dates(
         )
     )
     if not measurement_response.series:
-        return 0.0
+        return None
     total = sum(
         entry.electricity
         for entry in measurement_response.series
@@ -406,13 +418,12 @@ async def _get_average_daily_consumption_for_current_month(
         )
     )
     if not measurement_response.series:
-        return 0
+        return None
     valid_measurements = [
         entry.electricity
         for entry in measurement_response.series
         if entry.electricity is not None
     ]
-    average = (
-        sum(valid_measurements) / len(valid_measurements) if valid_measurements else 0
-    )
-    return safe_round(average)
+    if not valid_measurements:
+        return None
+    return safe_round(sum(valid_measurements) / len(valid_measurements))

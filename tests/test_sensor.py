@@ -123,7 +123,7 @@ class TestHelenDataCoordinator:
         ]["coordinator"]
 
         assert coordinator.data["last_month_consumption"] == 0.0
-        # New behavior: We try to call last_month (which raises 403), 
+        # New behavior: We try to call last_month (which raises 403),
         # catch the exception, and return 0.0. So all 3 calls are attempted.
         assert mock_api_client.get_daily_measurements_between_dates.call_count == 3
 

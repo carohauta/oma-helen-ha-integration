@@ -108,7 +108,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
   - **Extend mode**: runs a repair pass first (see below), then walks from `last_db_hour + 1h` to `latest_real_api_hour`, zero-filling any gaps; pending hours beyond the latest real hour are never written
   - **Rebuild mode**: anchors at the last DB record before the range (30-day lookback), overwrites the full range via upsert; data outside the range is never touched
   - **Repair pass** (`_repair_zero_filled_hours`): scans the DB window for zero-delta hours (cumulative unchanged from previous hour = previously zero-filled); for each hour where the API now has real data, calls `async_adjust_statistics` to cascade the correction forward
-  - **Pending data**: API hours with `electricity=None` are never written; the walk stops at the last real hour
+  - **Pending data**: API hours with `electricity=None` are never written; the walk stops at the last real hour. Only missing `electricity` zero-fills — a missing spot price still writes the real kWh with a 0.0 EUR spot-cost contribution (electricity-transfer sites return valid consumption but null spot prices)
   - Handles timezone conversion (Helsinki → UTC)
   - **Critical**: All timestamps normalized to UTC with microseconds stripped
   - Rounding: 2 decimals for consumption (kWh), 4 decimals for prices (EUR/kWh)

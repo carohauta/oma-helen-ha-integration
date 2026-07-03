@@ -117,6 +117,10 @@ class HelenStatisticsManager:
         (30-day lookback) and overwrites the full range via upsert. Used by the
         backfill service so historical data outside the requested range is never
         touched.
+
+        In both modes only a missing ``electricity`` value zero-fills an hour; a
+        missing spot price alone still writes the real kWh with a 0.0 EUR
+        spot-cost contribution (e.g. electricity-transfer sites).
         """
         if not series:
             _LOGGER.warning("No interval data to process")

@@ -243,14 +243,29 @@ class HelenStatisticsManager:
             electricity = self._extract_electricity_value(entry) if entry else None
             spot_price = self._extract_spot_price_value(entry) if entry else None
 
-            if electricity is None or spot_price is None:
+            if electricity is None:
+                # No consumption data yet for this hour — zero-fill so the
+                # cumulative sum holds flat. The repair pass upgrades it once
+                # real data arrives. Missing spot price is handled separately
+                # below so that missing prices never zero out real kWh.
                 electricity = 0.0
                 spot_price = 0.0
                 zero_filled += 1
                 _LOGGER.debug(
-                    "Zero-filling %s for %s: no data yet",
+                    "Zero-filling %s for %s: no consumption data yet",
                     current_hour.isoformat(),
                     self.entity_id,
+                )
+            elif spot_price is None:
+                # Consumption exists but no spot price (e.g. electricity-transfer
+                # sites, or prices not yet published). Write the real kWh; the
+                # spot-cost contribution for this hour is simply 0.0.
+                spot_price = 0.0
+                _LOGGER.debug(
+                    "No spot price for %s (%s): writing %.3f kWh with 0.0 EUR spot cost",
+                    current_hour.isoformat(),
+                    self.entity_id,
+                    electricity,
                 )
 
             hourly_cost = electricity * spot_price
@@ -370,8 +385,12 @@ class HelenStatisticsManager:
                 continue
             electricity = self._extract_electricity_value(entry)
             spot_price = self._extract_spot_price_value(entry)
-            if electricity is None or spot_price is None or electricity == 0.0:
+            # Repair as soon as real consumption arrives. A missing spot price
+            # must not block the consumption fix — it just means 0.0 spot cost.
+            if electricity is None or electricity == 0.0:
                 continue
+            if spot_price is None:
+                spot_price = 0.0
 
             hourly_cost = electricity * spot_price
             hourly_fixed_cost = (

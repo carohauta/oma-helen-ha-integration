@@ -680,6 +680,199 @@ class TestHelenStatisticsManager:
         cons_stats = cons_call[0][2]
         assert [s["sum"] for s in cons_stats] == [2.0, 4.0]
 
+    async def test_missing_spot_price_does_not_zero_out_consumption(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Real electricity with null spot price writes real kWh and 0.0 spot cost."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+            fixed_unit_price=10.0,  # 10 cents/kWh -> 0.10 EUR/kWh
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        base_time = datetime(2024, 5, 15, 10, 0, 0, tzinfo=helsinki_tz)
+        # Electricity-transfer site: valid kWh, spot price always null
+        series = [
+            Mock(
+                start=(base_time + timedelta(hours=i)).isoformat(),
+                stop=(base_time + timedelta(hours=i + 1)).isoformat(),
+                electricity=1.23,
+                electricity_spot_prices_vat=None,
+            )
+            for i in range(2)
+        ]
+
+        async def no_existing(statistic_id, start, end):
+            return {}
+
+        with (
+            patch.object(
+                manager, "_get_existing_statistics_in_window", side_effect=no_existing
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._write_statistics_chain(series)
+
+        def stream(statistic_id):
+            for call in mock_import.call_args_list:
+                meta = call[0][1]
+                sid = meta["statistic_id"] if isinstance(meta, dict) else meta.statistic_id
+                if sid == statistic_id:
+                    return call[0][2]
+            raise AssertionError(f"No import for {statistic_id}")
+
+        # Consumption reflects real kWh, cumulative (safe_round -> 2 decimals)
+        cons_stats = stream(manager.consumption_statistic_id)
+        assert [s["sum"] for s in cons_stats] == [1.23, 2.46]
+
+        # Spot cost stays flat at 0.0 (no spot price available)
+        spot_stats = stream(manager.cost_statistic_id)
+        assert [s["sum"] for s in spot_stats] == [0.0, 0.0]
+
+        # Fixed cost is still calculated from the fixed unit price
+        # (0.123 and 0.246 EUR, rounded to 2 decimals by safe_round)
+        fixed_stats = stream(manager.fixed_cost_statistic_id)
+        assert [s["sum"] for s in fixed_stats] == [0.12, 0.25]
+
+    async def test_missing_electricity_is_zero_filled(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Null electricity with a valid spot price is zero-filled (no consumption)."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        utc = ZoneInfo("UTC")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        last_db_hour_utc = now_hour - timedelta(hours=5)
+
+        def make(t_utc, electricity, spot):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=electricity,
+                electricity_spot_prices_vat=spot,
+            )
+
+        # +1 has a spot price but no electricity (zero-filled),
+        # +2 has real electricity (walk stops here).
+        series = [
+            make(last_db_hour_utc + timedelta(hours=1), None, 5.0),
+            make(last_db_hour_utc + timedelta(hours=2), 1.0, 100.0),
+        ]
+
+        existing = {manager.consumption_statistic_id: {last_db_hour_utc: 100.0}}
+
+        async def fake_existing(statistic_id, start, end):
+            return existing.get(statistic_id, {})
+
+        with (
+            patch.object(
+                manager, "_get_existing_statistics_in_window", side_effect=fake_existing
+            ),
+            patch.object(manager, "_repair_zero_filled_hours"),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._write_statistics_chain(series)
+
+        cons_call = next(
+            c
+            for c in mock_import.call_args_list
+            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            == manager.consumption_statistic_id
+        )
+        cons_stats = cons_call[0][2]
+        # +1: zero-filled (100), +2: real +1.0 (101)
+        assert [s["sum"] for s in cons_stats] == [100.0, 101.0]
+
+        # Spot cost must not be derived from the missing consumption:
+        # +1 contributes 0.0, +2 contributes 1.0 * 1.0 EUR/kWh
+        cost_call = next(
+            c
+            for c in mock_import.call_args_list
+            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            == manager.cost_statistic_id
+        )
+        cost_stats = cost_call[0][2]
+        assert [s["sum"] for s in cost_stats] == [0.0, 1.0]
+
+    async def test_repair_upgrades_hour_when_electricity_arrives_without_spot(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """A missing spot price must not block repairing a zero-filled hour."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        utc = ZoneInfo("UTC")
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        h1 = now_hour - timedelta(hours=3)
+        h2 = now_hour - timedelta(hours=2)
+        h3 = now_hour - timedelta(hours=1)
+
+        # DB: h1=100, h2=100 (zero-filled), h3=102 (real)
+        existing_consumption = {h1: 100.0, h2: 100.0, h3: 102.0}
+
+        def make(t_utc, electricity, spot):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=electricity,
+                electricity_spot_prices_vat=spot,
+            )
+
+        # API now has real electricity for h2 but still no spot price
+        api_entries = {
+            h1: make(h1, 2.0, 100.0),
+            h2: make(h2, 1.5, None),
+            h3: make(h3, 2.0, 100.0),
+        }
+
+        mock_recorder = Mock()
+        with patch(
+            "custom_components.helen_energy.statistics.get_instance",
+            return_value=mock_recorder,
+        ):
+            await manager._repair_zero_filled_hours(
+                api_entries, existing_consumption, False
+            )
+
+        adjust_calls = mock_recorder.async_adjust_statistics.call_args_list
+        consumption_calls = [
+            c for c in adjust_calls if c[0][0] == manager.consumption_statistic_id
+        ]
+        cost_calls = [c for c in adjust_calls if c[0][0] == manager.cost_statistic_id]
+
+        # Consumption repaired for h2 despite missing spot price
+        assert len(consumption_calls) == 1
+        assert consumption_calls[0][0][1] == h2
+        assert consumption_calls[0][0][2] == pytest.approx(1.5)
+
+        # Spot cost adjustment is 0.0 (no spot price)
+        assert len(cost_calls) == 1
+        assert cost_calls[0][0][1] == h2
+        assert cost_calls[0][0][2] == pytest.approx(0.0)
+
     async def test_transfer_contract_writes_real_consumption_without_spot_prices(
         self, hass: HomeAssistant, mock_api_client
     ):

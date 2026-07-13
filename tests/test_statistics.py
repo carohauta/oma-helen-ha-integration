@@ -1,6 +1,6 @@
 """Tests for Helen Energy statistics manager."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -679,3 +679,232 @@ class TestHelenStatisticsManager:
         )
         cons_stats = cons_call[0][2]
         assert [s["sum"] for s in cons_stats] == [2.0, 4.0]
+
+    async def test_transfer_contract_writes_real_consumption_without_spot_prices(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Transfer contracts have consumption but no spot prices — real kWh
+        must be written (not zero-filled) and the spot-cost stream stays flat."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        utc = ZoneInfo("UTC")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        range_start = now_hour - timedelta(hours=3)
+
+        def make(t_utc, electricity):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=electricity,
+                electricity_spot_prices_vat=None,  # transfer contract: no spot prices
+            )
+
+        series = [make(range_start + timedelta(hours=i), 1.0 + i) for i in range(3)]
+
+        async def no_existing(statistic_id, start, end):
+            return {}
+
+        with (
+            patch.object(
+                manager, "_get_existing_statistics_in_window", side_effect=no_existing
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._write_statistics_chain(series)
+
+        cons_call = next(
+            c
+            for c in mock_import.call_args_list
+            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            == manager.consumption_statistic_id
+        )
+        cons_stats = cons_call[0][2]
+        # Real consumption: 1.0, 2.0, 3.0 → cumulative 1, 3, 6 (NOT zero-filled)
+        assert [s["sum"] for s in cons_stats] == [1.0, 3.0, 6.0]
+
+        spot_call = next(
+            c
+            for c in mock_import.call_args_list
+            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            == manager.cost_statistic_id
+        )
+        spot_stats = spot_call[0][2]
+        # No spot prices → cost stream stays at zero
+        assert [s["sum"] for s in spot_stats] == [0.0, 0.0, 0.0]
+
+    async def test_transfer_contract_fixed_cost_stream_uses_unit_price(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """With a unit price set (e.g. transfer fee + tax) the fixed-cost stream
+        is written even though spot prices are missing."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+            fixed_unit_price=7.36,  # cents/kWh, e.g. siirtomaksu + sähkövero
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        utc = ZoneInfo("UTC")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        range_start = now_hour - timedelta(hours=2)
+
+        def make(t_utc):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=2.0,
+                electricity_spot_prices_vat=None,
+            )
+
+        series = [make(range_start + timedelta(hours=i)) for i in range(2)]
+
+        async def no_existing(statistic_id, start, end):
+            return {}
+
+        with (
+            patch.object(
+                manager, "_get_existing_statistics_in_window", side_effect=no_existing
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._write_statistics_chain(series)
+
+        assert mock_import.call_count == 3
+        fixed_call = next(
+            c
+            for c in mock_import.call_args_list
+            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            == manager.fixed_cost_statistic_id
+        )
+        fixed_stats = fixed_call[0][2]
+        # 2.0 kWh * 0.0736 EUR/kWh = 0.1472 EUR/h → cumulative ~0.15, ~0.29
+        assert [s["sum"] for s in fixed_stats] == [
+            pytest.approx(0.1472, abs=0.005),
+            pytest.approx(0.2944, abs=0.005),
+        ]
+
+    async def test_repair_fires_for_transfer_hours_without_spot_price(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """The repair pass must fix zero-filled hours even when the API entry
+        has no spot price (transfer contracts)."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        utc = ZoneInfo("UTC")
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        h1 = now_hour - timedelta(hours=3)
+        h2 = now_hour - timedelta(hours=2)
+        h3 = now_hour - timedelta(hours=1)
+
+        # DB: h2 was zero-filled (cumulative unchanged from h1)
+        existing_consumption = {h1: 100.0, h2: 100.0, h3: 102.0}
+
+        def make(t_utc, electricity):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=electricity,
+                electricity_spot_prices_vat=None,  # transfer contract
+            )
+
+        api_entries = {
+            h1: make(h1, 2.0),
+            h2: make(h2, 1.5),
+            h3: make(h3, 2.0),
+        }
+
+        mock_recorder = Mock()
+        with patch(
+            "custom_components.helen_energy.statistics.get_instance",
+            return_value=mock_recorder,
+        ):
+            await manager._repair_zero_filled_hours(
+                api_entries, existing_consumption, False
+            )
+
+        adjust_calls = mock_recorder.async_adjust_statistics.call_args_list
+        consumption_calls = [c for c in adjust_calls if c[0][0] == manager.consumption_statistic_id]
+        cost_calls = [c for c in adjust_calls if c[0][0] == manager.cost_statistic_id]
+
+        assert len(consumption_calls) == 1
+        assert consumption_calls[0][0][1] == h2
+        assert consumption_calls[0][0][2] == pytest.approx(1.5)
+
+        # Spot cost adjustment is zero (no spot price)
+        assert len(cost_calls) == 1
+        assert cost_calls[0][0][2] == pytest.approx(0.0)
+
+    async def test_backfill_fetches_in_yearly_chunks_and_clamps_to_contract_start(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Multi-year backfill is fetched in chunks of at most a year, the start
+        is clamped to the contract start, and all series feed one chain write."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        contract_start = date(2022, 3, 28)
+        end_date = date(2026, 7, 13)
+        requested_start = date(2022, 1, 1)  # before contract start → clamped
+
+        mock_api_client.get_contract_start_date.return_value = contract_start
+
+        chunk_calls = []
+
+        def fake_measurements(start, end, resolution):
+            chunk_calls.append((start, end))
+            response = Mock()
+            response.series = [Mock(start=f"{start}", electricity=1.0)]
+            response.missing_series = []
+            response.resolution = resolution
+            return response
+
+        mock_api_client.get_measurements_with_spot_prices.side_effect = (
+            fake_measurements
+        )
+
+        with patch.object(manager, "_write_statistics_chain") as mock_write:
+            await manager.backfill_statistics(requested_start, end_date)
+
+        # Clamped to contract start, chunks of <= 365 days, contiguous coverage
+        assert chunk_calls[0][0] == contract_start
+        assert chunk_calls[-1][1] == end_date
+        for start, end in chunk_calls:
+            assert (end - start).days <= 364
+        for (_, prev_end), (next_start, _) in zip(chunk_calls, chunk_calls[1:]):
+            assert next_start == prev_end + timedelta(days=1)
+        assert len(chunk_calls) == 5  # 2022-03-28 → 2026-07-13 is ~4.3 years
+
+        # One combined rebuild write with a series entry per chunk
+        mock_write.assert_called_once()
+        combined_series = mock_write.call_args[0][0]
+        assert len(combined_series) == len(chunk_calls)
+        assert mock_write.call_args.kwargs.get("rebuild") is True

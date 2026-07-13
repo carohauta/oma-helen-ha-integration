@@ -243,15 +243,18 @@ class HelenStatisticsManager:
             electricity = self._extract_electricity_value(entry) if entry else None
             spot_price = self._extract_spot_price_value(entry) if entry else None
 
-            if electricity is None or spot_price is None:
+            if electricity is None:
                 electricity = 0.0
-                spot_price = 0.0
                 zero_filled += 1
                 _LOGGER.debug(
                     "Zero-filling %s for %s: no data yet",
                     current_hour.isoformat(),
                     self.entity_id,
                 )
+
+            if spot_price is None:
+                # Transfer contracts have no spot prices
+                spot_price = 0.0
 
             hourly_cost = electricity * spot_price
             hourly_fixed_cost = (
@@ -370,10 +373,12 @@ class HelenStatisticsManager:
                 continue
             electricity = self._extract_electricity_value(entry)
             spot_price = self._extract_spot_price_value(entry)
-            if electricity is None or spot_price is None or electricity == 0.0:
+            if electricity is None or electricity == 0.0:
                 continue
 
-            hourly_cost = electricity * spot_price
+            # Transfer contracts never have spot prices — repair consumption
+            # anyway and leave the spot-cost stream unchanged (zero delta).
+            hourly_cost = electricity * (spot_price or 0.0)
             hourly_fixed_cost = (
                 electricity * (self._fixed_unit_price / 100.0)
                 if has_fixed_price
@@ -406,11 +411,17 @@ class HelenStatisticsManager:
                 self.entity_id,
             )
 
+    # The API silently returns an empty series ("missing_series") for large
+    # requests, so we fetch in yearly chunks instead.
+    BACKFILL_CHUNK_DAYS = 365
+
     async def backfill_statistics(self, start_date: date, end_date: date) -> None:
         """Backfill statistics for a custom date range.
 
         Uses hourly API resolution (not quarter) for larger date ranges.
         Rebuilds the full requested range, overwriting existing data.
+        Ranges longer than a year are fetched in yearly chunks; all chunks
+        must succeed before anything is written to the database.
 
         Args:
             start_date: First date to backfill (inclusive)
@@ -438,36 +449,59 @@ class HelenStatisticsManager:
             )
             return
 
-        # API will handle partial overlap (contract started during the range)
+        # Clamp the start to the contract start — requesting earlier dates
+        # makes the API return 403 no-relevant-contract
+        if contract_start is not None and contract_start > start_date:
+            _LOGGER.info(
+                "Clamping backfill start from %s to contract start %s",
+                start_date,
+                contract_start,
+            )
+            start_date = contract_start
 
         try:
-            # Fetch hourly data from API
-            response: MeasurementsWithSpotPriceResponse = (
-                await self.hass.async_add_executor_job(
-                    self.api_client.get_measurements_with_spot_prices,
-                    start_date,
+            # Fetch hourly data from the API in yearly chunks. Everything is
+            # collected up front so a failing chunk leaves the DB untouched.
+            series: list[MeasurementsWithSpotPriceSeries] = []
+            chunk_start = start_date
+            while chunk_start <= end_date:
+                chunk_end = min(
+                    chunk_start + timedelta(days=self.BACKFILL_CHUNK_DAYS - 1),
                     end_date,
-                    RESOLUTION_HOUR,  # Use hourly resolution for large ranges
                 )
-            )
+                response: MeasurementsWithSpotPriceResponse = (
+                    await self.hass.async_add_executor_job(
+                        self.api_client.get_measurements_with_spot_prices,
+                        chunk_start,
+                        chunk_end,
+                        RESOLUTION_HOUR,  # Use hourly resolution for large ranges
+                    )
+                )
 
-            _LOGGER.debug(
-                "Received %d hourly intervals from API (resolution: %s)",
-                len(response.series),
-                response.resolution,
-            )
+                _LOGGER.debug(
+                    "Received %d hourly intervals for chunk %s to %s (resolution: %s)",
+                    len(response.series),
+                    chunk_start,
+                    chunk_end,
+                    response.resolution,
+                )
 
-            if not response.series:
+                if response.missing_series:
+                    _LOGGER.warning(
+                        "API reported missing series %s for chunk %s to %s",
+                        response.missing_series,
+                        chunk_start,
+                        chunk_end,
+                    )
+
+                series.extend(response.series)
+                chunk_start = chunk_end + timedelta(days=1)
+
+            if not series:
                 _LOGGER.warning("No data received from API for date range")
                 return
 
-            if response.missing_series:
-                _LOGGER.warning(
-                    "API reported %d missing hourly intervals in requested range",
-                    len(response.missing_series),
-                )
-
-            await self._write_statistics_chain(response.series, rebuild=True)
+            await self._write_statistics_chain(series, rebuild=True)
 
         except InvalidApiResponseException as err:
             # Check if this is a "no relevant contract" error

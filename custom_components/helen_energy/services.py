@@ -21,9 +21,6 @@ SERVICE_BACKFILL_SCHEMA = vol.Schema(
     }
 )
 
-MAX_BACKFILL_DAYS = 365  # 1 year maximum
-
-
 async def async_setup_services(hass: HomeAssistant) -> None:
     """Set up services for Helen Energy integration."""
 
@@ -37,13 +34,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError("start_date cannot be in the future")
 
         date_range = (end_date - start_date).days
-        if date_range > MAX_BACKFILL_DAYS:
-            raise ServiceValidationError(
-                f"Date range cannot exceed {MAX_BACKFILL_DAYS} days. "
-                f"Requested start_date is {date_range} days ago. "
-                f"Use a more recent start_date."
-            )
-
         config_entry_id: str | None = call.data.get("config_entry_id")
         contract_msg = (
             f" for config entry {config_entry_id}"

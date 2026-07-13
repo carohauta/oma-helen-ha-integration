@@ -5,6 +5,7 @@ backfill_statistics:
 
     - Rebuilds statistics from start_date to today, overwriting any existing data in that range
     - Data before start_date is never touched
+    - The start date is automatically clamped to the contract start date; multi-year ranges are fetched in yearly chunks
     - Select a specific contract, or leave blank to backfill all contracts
     - Note: if your fixed unit price has changed, running this will reprice the entire requested range using the current price
   fields:

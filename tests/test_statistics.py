@@ -1,6 +1,7 @@
 """Tests for Helen Energy statistics manager."""
 
 from datetime import date, datetime, timedelta
+from itertools import pairwise
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -1092,7 +1093,7 @@ class TestHelenStatisticsManager:
         assert chunk_calls[-1][1] == end_date
         for start, end in chunk_calls:
             assert (end - start).days <= 364
-        for (_, prev_end), (next_start, _) in zip(chunk_calls, chunk_calls[1:]):
+        for (_, prev_end), (next_start, _) in pairwise(chunk_calls):
             assert next_start == prev_end + timedelta(days=1)
         assert len(chunk_calls) == 5  # 2022-03-28 → 2026-07-13 is ~4.3 years
 

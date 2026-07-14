@@ -192,12 +192,25 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             # Get prices based on contract type
             try:
                 _LOGGER.debug("Fetching unit price")
-                data["unit_price"] = await self.hass.async_add_executor_job(
+                unit_price = await self.hass.async_add_executor_job(
                     self.api_client.get_contract_energy_unit_price
                 )
             except InvalidApiResponseException as e:
                 _LOGGER.debug("Failed to get unit price: %s", e)
-                data["unit_price"] = None
+                unit_price = None
+
+            # Transfer-only contracts have no energy product, so the API
+            # returns 0.0 for the unit price and None for the contract type.
+            # Fall back to their transfer fee.
+            if not unit_price and data.get("contract_type") is None:
+                try:
+                    unit_price = await self.hass.async_add_executor_job(
+                        self.api_client.get_transfer_fee
+                    )
+                except InvalidApiResponseException as e:
+                    _LOGGER.debug("Failed to get transfer fee: %s", e)
+                    unit_price = None
+            data["unit_price"] = unit_price
 
             # Resolve the effective contract type now that we have the API code.
             # Handles the "automatic" user choice and any unrecognised codes.

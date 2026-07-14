@@ -94,7 +94,6 @@ You can call actions from the UI in 'Developer Tools → Actions'. Look for `hel
 - `config_entry_id` (optional): Target a specific Helen Energy entry. If omitted, backfills all configured contracts.
 
 **Limitations:**
-- Maximum backfill range: 365 days (1 year)
 - Always backfills from start_date to today
 - Only the requested date range is rewritten; statistics outside that range (e.g., older history) are never touched
 - If your fixed unit price has changed, running backfill will reprice the entire requested range using the current price

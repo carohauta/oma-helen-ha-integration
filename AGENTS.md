@@ -264,3 +264,17 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - Config entry migration uses `async_update_entry(..., version=...)` (the supported API; direct `entry.version = x` assignment is rejected by modern HA)
 - Uses `StatisticMeanType` if available (HA 2026.11+), fallback to `has_mean`
 - Unit class handling: EUR and EUR/kWh may break in future HA versions (noted in code)
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as local markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five canonical roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout (`CONTEXT.md` + `docs/adr/` at repo root). See `docs/agents/domain.md`.

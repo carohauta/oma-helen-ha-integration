@@ -244,6 +244,7 @@ pyvenv.cfg
 # Local development files
 .local/
 scratch/
+.scratch/
 playground/
 
 # HACS (Home Assistant Community Store) development

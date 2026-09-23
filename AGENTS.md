@@ -105,9 +105,10 @@ find . -type d -name __pycache__ -exec rm -rf {} +
   - Two entry points share `_write_statistics_chain()` with different modes:
     - `import_recent_statistics()` — extend mode, 168h (7-day) rolling window (used by the coordinator)
     - `backfill_statistics(start_date, end_date)` — rebuild mode, custom range (used by the service)
-  - **Extend mode**: runs a repair pass first (see below), then walks from `last_db_hour + 1h` to `latest_real_api_hour`, zero-filling any gaps; pending hours beyond the latest real hour are never written
+  - **Extend mode**: runs a repair pass first (see below), then walks from `last_db_hour + 1h` to `latest_real_api_hour`, zero-filling any gaps; pending hours beyond the latest real hour are never written. The anchor is the last DB sum **plus the repair pass's returned totals** (see below)
   - **Rebuild mode**: anchors at the last DB record before the range (30-day lookback), overwrites the full range via upsert; data outside the range is never touched
-  - **Repair pass** (`_repair_zero_filled_hours`): scans the DB window for zero-delta hours (cumulative unchanged from previous hour = previously zero-filled); for each hour where the API now has real data, calls `async_adjust_statistics` to cascade the correction forward
+  - **Repair pass** (`_repair_zero_filled_hours`): scans the DB window for zero-delta hours (cumulative unchanged from previous hour = previously zero-filled); for each hour where the API now has real data, calls `async_adjust_statistics` to cascade the correction forward, and returns the totals it applied so the caller can fold them into the walk anchor
+  - **Anchor fallback** (`_anchor_at`): the anchor hour comes from the consumption series, but cost series are queried separately and can lag. Falls back to the most recent *earlier* record rather than 0.0, which would reset the chain
   - **Pending data**: API hours with `electricity=None` are never written; the walk stops at the last real hour
   - Handles timezone conversion (Helsinki → UTC)
   - **Critical**: All timestamps normalized to UTC with microseconds stripped
@@ -165,7 +166,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 
 1. **`import_recent_statistics()`** - Coordinator entry point
    - Fetches hourly data via `_fetch_interval_data()`, then calls `_write_statistics_chain(series)`
-   - Extend mode: anchors at the last DB record in the window, appends new hours only
+   - Extend mode: anchors at the last DB record in the window (plus any repair-pass totals), appends new hours only
 
 3. **`backfill_statistics(start_date, end_date)`** - Custom-range rebuild
    - Fetches the range at `RESOLUTION_HOUR`, then calls `_write_statistics_chain(series, rebuild=True)`
@@ -174,23 +175,24 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 4. **`_write_statistics_chain(series, rebuild=False)`** - Core chain writer
    - Builds `api_entries` dict (UTC hour → series entry); finds `latest_real_api_hour`
    - Extend: runs `_repair_zero_filled_hours`, then walks from `last_db_hour + 1h` to `latest_real_api_hour`, zero-filling any gaps
+   - Extend queries the DB window starting one hour *before* `earliest_api`, so the first API hour has a predecessor and is repairable
    - Rebuild: anchors at last DB record before range, walks and upserts the full range
    - Imports all three streams via `_import_statistics()`
 
-5. **`_repair_zero_filled_hours(api_entries, existing_consumption, has_fixed_price)`** - Auto-repair
-   - Detects zero-filled hours as consecutive DB records with equal cumulative sum
+5. **`_repair_zero_filled_hours(api_entries, existing_consumption, has_fixed_price) -> RepairTotals`** - Auto-repair
+   - Detects zero-filled hours as consecutive DB records whose cumulative sums differ by less than `SUM_EPSILON`
    - For each such hour where API now has real data: calls `recorder.async_adjust_statistics` for all three streams
-   - HA cascades each adjustment to all subsequent records automatically
+   - HA cascades each adjustment to all subsequent records automatically — **including `last_db_hour`**
+   - Returns `RepairTotals(consumption, cost, fixed_cost)`. The caller **must** add these to its anchor: the `existing_*` snapshot was read before the adjustments, so anchoring off it drops the repaired amount and emits a negative spike (see Common Pitfalls)
 
-6. **`_get_existing_statistics_in_window()`** - DB window query
+6. **`_anchor_at(existing, hour)`** - Anchor lookup with continuity fallback
+   - Returns `existing[hour]`, else the most recent record *before* `hour`, else `0.0`
+   - Never returns `0.0` when earlier records exist, which would reset a cumulative chain
+
+7. **`_get_existing_statistics_in_window()`** - DB window query
    - Returns `{UTC datetime: cumulative_sum}` for a statistic ID in a time range
 
-7. **`_import_statistics()`** - HA import wrapper
-   - Calls `async_add_external_statistics` with correct `StatisticMetaData`
-
-   - Queries `statistics_during_period` from epoch to the timestamp; returns `(sum, timestamp)`
-
-9. **`_import_statistics(statistic_id, name, unit, unit_class, statistics)`** - Single import helper
+8. **`_import_statistics(statistic_id, name, unit, unit_class, statistics)`** - Single import helper
    - Builds `StatisticMetaData` (with version-aware `mean_type`/`has_mean`) and calls `async_add_external_statistics`
    - One method for all three streams (consumption/spot/fixed)
 
@@ -206,6 +208,8 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - **Chain extension tests**: mock `_get_existing_statistics_in_window` to seed DB state; assert cumulative sums start from the correct anchor
 - **Zero-fill tests**: verify gaps between walk_start and `latest_real_hour` are zero-filled; verify pending hours beyond `latest_real_hour` are not written
 - **Repair pass tests**: mock `get_instance` recorder; assert `async_adjust_statistics` is called with correct deltas for previously zero-filled hours; assert no calls when API still has no data
+- **Anchor tests**: drive the *real* repair pass (mock only the recorder), never stub `_repair_zero_filled_hours` with a fabricated `RepairTotals` — a stubbed total verifies the caller against an invented contract, not against what was actually adjusted
+- Use the `_stats_for(mock_import, statistic_id)` helper to pull imported `StatisticData` out of the `async_add_external_statistics` mock
 - **End-to-end**: `test_write_statistics_chain_imports_all_three_streams` asserts all three streams import with correct metadata and cumulative sums
 - **Rebuild mode tests**: verify anchor is taken from the lookback window (before the range), not from records inside the range
 
@@ -252,6 +256,18 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - **Symptom**: Cumulative values grow by ~89 kWh on every HA restart
 - **Root cause**: cumulative chain jumping over missing hours, producing wrong base for subsequent records
 - **Fix**: consecutive walk from `last_db_hour + 1h` — the chain never jumps, and the anchor is always the last verified DB record
+
+**Negative Spike After a Multi-Day API Outage**:
+- **Symptom**: a single large negative delta (e.g. −13.5 kWh) at one hour, appearing after Helen has been days behind and then backfills. Confirmed instance: `2026-09-20T03:00Z`
+- **Root cause**: `async_adjust_statistics` cascades repair deltas into the DB's `sum`, but the `existing_*` snapshot used to pick the walk anchor was read *before* the repair pass ran. Anchoring off that stale snapshot silently discards every repaired kWh
+- **Fingerprint**: `sum` and `state` diverge by a constant on rows written before the spike. The write path always sets `state == sum`, so a gap can only come from an adjustment (which touches `sum` only)
+- **Fix**: `_repair_zero_filled_hours` returns `RepairTotals`; `_write_statistics_chain` adds them to the anchor. Never anchor off a pre-repair snapshot
+- **Note**: adjusted rows keep their stale `state` permanently — only `sum` is corrected. This is cosmetic (external statistics and the Energy Dashboard read `sum`), but it is why the fingerprint above persists even after the fix
+
+**Cumulative Chain Reset to Zero**:
+- **Symptom**: a cost stream drops to near-zero while consumption stays correct
+- **Root cause**: the anchor hour is chosen from the *consumption* series; a `.get(hour, 0.0)` fallback on a cost series that lags by an hour restarts the chain from zero
+- **Fix**: use `_anchor_at`, which falls back to the most recent earlier record
 
 **Inconsistent Timestamps**:
 - **Symptom**: Multiple statistics entries for the same hour with different cumulative values

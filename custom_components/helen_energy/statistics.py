@@ -52,7 +52,9 @@ def _split_into_chunks(
     chunks: list[tuple[date, date]] = []
     chunk_start = start_date
     while chunk_start <= end_date:
-        chunk_end = min(chunk_start + timedelta(days=max_days), end_date)
+        # -1 because both ends are inclusive: max_days=365 spans a year, not a
+        # year and a day.
+        chunk_end = min(chunk_start + timedelta(days=max_days - 1), end_date)
         chunks.append((chunk_start, chunk_end))
         chunk_start = chunk_end + timedelta(days=1)
     return chunks

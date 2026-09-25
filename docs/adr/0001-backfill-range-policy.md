@@ -15,7 +15,9 @@ So: the backfill service imposes **no lower bound and no upper bound** on the re
 
 Reported on [#42](https://github.com/carohauta/oma-helen-ha-integration/pull/42) and not known when the above was written. On the transfer channel (`osv`), a request spanning **1,461 days or fewer returns everything; at 1,462 days the response is HTTP 200 with `electricity: null` on every hour and `missing_series: ["electricity_transfer"]`.** The data is dropped silently — no error status, no partial result.
 
-"One request, however long" is therefore safe only below that ceiling, so the rejection of chunking above is wrong as a blanket statement. Chunking is reinstated — but note what has and hasn't changed: it comes back as a workaround for a hard API limit, not for the API-politeness reason it was originally offered under, and **the clamp stays gone**. The two were coupled in the original PR, which is what made them look like one idea; they are independent.
+"One request, however long" is therefore safe only below that ceiling, so the rejection of chunking above is wrong, and chunking is reinstated. **The clamp stays gone**; the two were coupled in the original PR, which is what made them look like one idea, but only the clamp had the renewal problem.
+
+For the record, the rejection above was not merely unlucky. #42 carried the reason in a code comment — *"The API silently returns an empty series (`missing_series`) for large requests, so we fetch in yearly chunks instead"* — and it was read as an API-politeness measure and removed. The lesson worth keeping: a contributor's stated reason for a defensive measure outranks an assumption about their motive, and removing one needs its premise disproved rather than doubted.
 
 **Chunk size is `MAX_BACKFILL_CHUNK_DAYS = 365`, not 1,460.** The ceiling rests on a single measurement on a single channel, and the energy channel (`oh`) is unverified. A year leaves a wide margin, keeps responses to ~8,760 points, and costs ten requests for a decade of history — seconds, on a manually triggered action. It is also the size the contributor originally chose.
 

@@ -1076,7 +1076,8 @@ class TestHelenStatisticsManager:
             "Helen Energy (test)",
         )
         end_date = date.today()
-        start_date = end_date - timedelta(days=MAX_BACKFILL_CHUNK_DAYS)
+        # Inclusive span of exactly MAX_BACKFILL_CHUNK_DAYS — the boundary case
+        start_date = end_date - timedelta(days=MAX_BACKFILL_CHUNK_DAYS - 1)
 
         response = Mock()
         response.series = [Mock(start=str(start_date), electricity=1.0)]

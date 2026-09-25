@@ -171,6 +171,9 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 3. **`backfill_statistics(start_date, end_date)`** - Custom-range rebuild
    - Fetches the range at `RESOLUTION_HOUR`, then calls `_write_statistics_chain(series, rebuild=True)`
    - Rebuild mode: anchors at the last DB record *before* the range (30-day lookback), upserts the full range
+   - Ranges over `MAX_BACKFILL_CHUNK_DAYS=365` are split by `_split_into_chunks()` and fetched sequentially; all chunks are fetched before anything is written, so a mid-range failure leaves the DB untouched
+   - A chunk that 403s with `no-relevant-contract` is skipped (it predates the contract); if *every* chunk does, that's an error. Any other API error fails immediately — see ADR-0001
+   - `_is_dropped_payload()` raises on an HTTP 200 whose hours are all `electricity=None` with a non-empty `missing_series`: that is the API discarding an over-long span, not an empty period
 
 4. **`_write_statistics_chain(series, rebuild=False)`** - Core chain writer
    - Builds `api_entries` dict (UTC hour → series entry); finds `latest_real_api_hour`

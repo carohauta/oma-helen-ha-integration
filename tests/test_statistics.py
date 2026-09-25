@@ -5,12 +5,15 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from helenservice.api_exceptions import InvalidApiResponseException
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 
+from custom_components.helen_energy.const import MAX_BACKFILL_CHUNK_DAYS
 from custom_components.helen_energy.statistics import (
     HelenStatisticsManager,
     RepairTotals,
+    _split_into_chunks,
 )
 
 
@@ -1051,13 +1054,213 @@ class TestHelenStatisticsManager:
         with patch.object(manager, "_write_statistics_chain") as mock_write:
             await manager.backfill_statistics(requested_start, end_date)
 
-        # One request for the full requested range, unclamped and unchunked
-        assert mock_api_client.get_measurements_with_spot_prices.call_count == 1
-        call_start, call_end = (
-            mock_api_client.get_measurements_with_spot_prices.call_args[0][:2]
-        )
-        assert call_start == requested_start
-        assert call_end == end_date
+        # The range may be chunked, but it must still begin where the caller
+        # asked and end today — never at the contract start.
+        calls = mock_api_client.get_measurements_with_spot_prices.call_args_list
+        assert calls[0][0][0] == requested_start
+        assert calls[-1][0][1] == end_date
+        assert all(c[0][0] != date(2024, 8, 1) for c in calls)
 
         mock_write.assert_called_once()
         assert mock_write.call_args.kwargs.get("rebuild") is True
+
+    async def test_short_range_is_a_single_request(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """A range inside the chunk limit stays one API call."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+        end_date = date.today()
+        start_date = end_date - timedelta(days=MAX_BACKFILL_CHUNK_DAYS)
+
+        response = Mock()
+        response.series = [Mock(start=str(start_date), electricity=1.0)]
+        response.missing_series = []
+        response.resolution = "hour"
+        mock_api_client.get_measurements_with_spot_prices.return_value = response
+
+        with patch.object(manager, "_write_statistics_chain"):
+            await manager.backfill_statistics(start_date, end_date)
+
+        assert mock_api_client.get_measurements_with_spot_prices.call_count == 1
+
+    async def test_long_range_is_split_into_contiguous_chunks(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """Beyond the limit the range is split, with no gaps or overlaps.
+
+        The transfer channel silently drops the payload past ~4 years, so a
+        long backfill must never reach the API as one request. See ADR-0001.
+        """
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+        end_date = date(2026, 9, 25)
+        start_date = end_date - timedelta(days=1500)
+
+        response = Mock()
+        response.series = [Mock(start="2022-01-01", electricity=1.0)]
+        response.missing_series = []
+        response.resolution = "hour"
+        mock_api_client.get_measurements_with_spot_prices.return_value = response
+
+        with patch.object(manager, "_write_statistics_chain"):
+            await manager.backfill_statistics(start_date, end_date)
+
+        calls = mock_api_client.get_measurements_with_spot_prices.call_args_list
+        assert len(calls) > 1
+        spans = [(c[0][0], c[0][1]) for c in calls]
+        assert spans[0][0] == start_date
+        assert spans[-1][1] == end_date
+        for (_, prev_end), (next_start, _) in zip(spans, spans[1:]):
+            assert next_start == prev_end + timedelta(days=1)
+        assert all(
+            (chunk_end - chunk_start).days <= MAX_BACKFILL_CHUNK_DAYS
+            for chunk_start, chunk_end in spans
+        )
+
+    async def test_chunk_before_contract_start_is_skipped(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """A leading chunk that predates the contract 403s; later chunks carry on.
+
+        Splitting a partially-overlapping range turns its pre-contract stretch
+        into whole requests the API rejects. That is expected, not a failure.
+        """
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+        end_date = date(2026, 9, 25)
+        start_date = end_date - timedelta(days=400)  # two chunks
+
+        response = Mock()
+        response.series = [Mock(start="2025-06-01", electricity=1.0)]
+        response.missing_series = []
+        response.resolution = "hour"
+        mock_api_client.get_measurements_with_spot_prices.side_effect = [
+            InvalidApiResponseException("403: no-relevant-contract"),
+            response,
+        ]
+
+        with patch.object(manager, "_write_statistics_chain") as mock_write:
+            await manager.backfill_statistics(start_date, end_date)
+
+        mock_write.assert_called_once()
+        assert mock_write.call_args[0][0] == response.series
+
+    async def test_all_chunks_outside_contract_is_an_error(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """If every chunk 403s the range really is outside the contract."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+        end_date = date(2026, 9, 25)
+        start_date = end_date - timedelta(days=800)
+
+        mock_api_client.get_measurements_with_spot_prices.side_effect = (
+            InvalidApiResponseException("403: no-relevant-contract")
+        )
+
+        with patch.object(manager, "_write_statistics_chain") as mock_write:
+            with pytest.raises(ValueError, match="outside your contract period"):
+                await manager.backfill_statistics(start_date, end_date)
+
+        mock_write.assert_not_called()
+
+    async def test_non_contract_api_error_is_not_swallowed(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """A real API fault fails the backfill instead of being skipped."""
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+        end_date = date(2026, 9, 25)
+        start_date = end_date - timedelta(days=800)
+
+        mock_api_client.get_measurements_with_spot_prices.side_effect = (
+            InvalidApiResponseException("500: internal server error")
+        )
+
+        with patch.object(manager, "_write_statistics_chain") as mock_write:
+            with pytest.raises(InvalidApiResponseException):
+                await manager.backfill_statistics(start_date, end_date)
+
+        mock_write.assert_not_called()
+
+    async def test_dropped_payload_raises_instead_of_writing_nothing(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """An all-null 200 response is a failure wearing a success status.
+
+        Helen answers an over-long span with HTTP 200, every hour null, and the
+        channel named in missing_series. Writing nothing and logging a warning
+        would report success for a backfill that imported no data.
+        """
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+
+        response = Mock()
+        response.series = [
+            Mock(start="2026-09-01", electricity=None),
+            Mock(start="2026-09-02", electricity=None),
+        ]
+        response.missing_series = ["electricity_transfer"]
+        response.resolution = "hour"
+        mock_api_client.get_measurements_with_spot_prices.return_value = response
+
+        with patch.object(manager, "_write_statistics_chain") as mock_write:
+            with pytest.raises(InvalidApiResponseException, match="no usable data"):
+                await manager.backfill_statistics(start_date, end_date)
+
+        mock_write.assert_not_called()
+
+
+class TestSplitIntoChunks:
+    """Chunk boundaries."""
+
+    def test_range_within_limit_is_one_chunk(self):
+        start, end = date(2026, 1, 1), date(2026, 6, 1)
+        assert _split_into_chunks(start, end, 365) == [(start, end)]
+
+    def test_single_day_is_one_chunk(self):
+        day = date(2026, 1, 1)
+        assert _split_into_chunks(day, day, 365) == [(day, day)]
+
+    def test_chunks_are_contiguous_and_cover_the_range(self):
+        start, end = date(2020, 1, 1), date(2026, 9, 25)
+        chunks = _split_into_chunks(start, end, 365)
+
+        assert chunks[0][0] == start
+        assert chunks[-1][1] == end
+        for (_, prev_end), (next_start, _) in zip(chunks, chunks[1:]):
+            assert next_start == prev_end + timedelta(days=1)
+        assert all((c_end - c_start).days <= 365 for c_start, c_end in chunks)

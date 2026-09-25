@@ -26,5 +26,12 @@ STATISTICS_BACKFILL_HOURS: Final = 168  # 7 days; hours outside this window are 
 # Unrelated to STATISTICS_BACKFILL_HOURS, which is the automatic repair window.
 DEFAULT_BACKFILL_DAYS: Final = 30
 
+# Longest span sent to the API in one request. The transfer channel silently
+# drops everything past 1461 days (HTTP 200, all-null electricity), so long
+# backfills are split. 365 keeps a wide margin under the only measured
+# boundary and holds even if other channels turn out to be stricter.
+# See ADR-0001.
+MAX_BACKFILL_CHUNK_DAYS: Final = 365
+
 # Services
 SERVICE_BACKFILL_STATISTICS: Final = "backfill_statistics"

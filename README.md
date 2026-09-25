@@ -95,6 +95,7 @@ You can call actions from the UI in 'Developer Tools → Actions'. Look for `hel
 
 **Limitations:**
 - No maximum range. A `start_date` from before your contract began is fine — Helen returns data from the contract start onwards
+- Ranges longer than a year are fetched from Helen in one-year batches, so a multi-year backfill takes proportionally longer
 - Always backfills from start_date to today
 - Only the requested date range is rewritten; statistics outside that range (e.g., older history) are never touched
 - If your fixed unit price has changed, running backfill will reprice the entire requested range using the current price

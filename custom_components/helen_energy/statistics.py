@@ -30,7 +30,7 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, STATISTICS_BACKFILL_HOURS
+from .const import DOMAIN, MAX_BACKFILL_CHUNK_DAYS, STATISTICS_BACKFILL_HOURS
 from .utils import safe_round
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +39,43 @@ _LOGGER = logging.getLogger(__name__)
 # of the last stored decimal is indistinguishable from an untouched cumulative.
 # Used both to detect zero-filled hours and to ignore repairs too small to store.
 SUM_EPSILON = 0.005
+
+
+def _split_into_chunks(
+    start_date: date, end_date: date, max_days: int
+) -> list[tuple[date, date]]:
+    """Split an inclusive date range into consecutive spans of at most max_days.
+
+    A range that already fits comes back as a single chunk, so the common case
+    stays one API request.
+    """
+    chunks: list[tuple[date, date]] = []
+    chunk_start = start_date
+    while chunk_start <= end_date:
+        chunk_end = min(chunk_start + timedelta(days=max_days), end_date)
+        chunks.append((chunk_start, chunk_end))
+        chunk_start = chunk_end + timedelta(days=1)
+    return chunks
+
+
+def _is_out_of_contract_error(err: Exception) -> bool:
+    """Whether an API error means "you had no contract then" rather than a fault."""
+    error_msg = str(err).lower()
+    return "no-relevant-contract" in error_msg or "no relevant contracts" in error_msg
+
+
+def _is_dropped_payload(response: MeasurementsWithSpotPriceResponse) -> bool:
+    """Whether a 200 response is an empty payload dressed up as a success.
+
+    Helen answers an over-long span with HTTP 200, every hour's ``electricity``
+    set to ``None``, and the channel listed in ``missing_series`` — so the only
+    way to tell it apart from a genuine response is to look at the contents.
+    """
+    return bool(
+        response.series
+        and response.missing_series
+        and all(entry.electricity is None for entry in response.series)
+    )
 
 
 class RepairTotals(NamedTuple):
@@ -487,6 +524,11 @@ class HelenStatisticsManager:
         Uses hourly API resolution (not quarter) for larger date ranges.
         Rebuilds the full requested range, overwriting existing data.
 
+        Ranges longer than ``MAX_BACKFILL_CHUNK_DAYS`` are fetched in
+        consecutive chunks, because the API silently drops the payload on a
+        long enough span (see ADR-0001). Every chunk is fetched before anything
+        is written, so a failure part-way leaves existing statistics untouched.
+
         Args:
             start_date: First date to backfill (inclusive)
             end_date: Last date to backfill (inclusive)
@@ -503,34 +545,83 @@ class HelenStatisticsManager:
         # partial overlap and Helen returns data from the contract start
         # onwards. Never clamp to get_contract_start_date() — see ADR-0001.
 
-        try:
-            # Fetch hourly data from API
-            response: MeasurementsWithSpotPriceResponse = (
-                await self.hass.async_add_executor_job(
-                    self.api_client.get_measurements_with_spot_prices,
-                    start_date,
-                    end_date,
-                    RESOLUTION_HOUR,  # Use hourly resolution for large ranges
-                )
-            )
-
+        chunks = _split_into_chunks(start_date, end_date, MAX_BACKFILL_CHUNK_DAYS)
+        if len(chunks) > 1:
             _LOGGER.debug(
-                "Received %d hourly intervals from API (resolution: %s)",
-                len(response.series),
-                response.resolution,
+                "Range exceeds %d days, splitting into %d requests",
+                MAX_BACKFILL_CHUNK_DAYS,
+                len(chunks),
             )
 
-            if not response.series:
+        try:
+            series: list[MeasurementsWithSpotPriceSeries] = []
+            out_of_contract_chunks = 0
+
+            for chunk_start, chunk_end in chunks:
+                try:
+                    # Fetch hourly data from API
+                    response: MeasurementsWithSpotPriceResponse = (
+                        await self.hass.async_add_executor_job(
+                            self.api_client.get_measurements_with_spot_prices,
+                            chunk_start,
+                            chunk_end,
+                            RESOLUTION_HOUR,  # Use hourly resolution for large ranges
+                        )
+                    )
+                except InvalidApiResponseException as err:
+                    # A chunk lying entirely before the contract began is an
+                    # expected 403 when a long range is split; skip it and let
+                    # the later chunks carry the data. If *every* chunk fails
+                    # this way the range really is outside the contract, which
+                    # the check after the loop turns into an error.
+                    if not _is_out_of_contract_error(err):
+                        raise
+                    out_of_contract_chunks += 1
+                    _LOGGER.debug(
+                        "Chunk %s to %s is outside the contract period, skipping",
+                        chunk_start,
+                        chunk_end,
+                    )
+                    continue
+
+                _LOGGER.debug(
+                    "Received %d hourly intervals from API for %s to %s (resolution: %s)",
+                    len(response.series),
+                    chunk_start,
+                    chunk_end,
+                    response.resolution,
+                )
+
+                # HTTP 200 carrying no usable data: the API drops the payload
+                # rather than erroring when a span is too long. Loud, because
+                # the alternative is writing nothing and reporting success.
+                if _is_dropped_payload(response):
+                    raise InvalidApiResponseException(
+                        f"Helen returned no usable data for {chunk_start} to {chunk_end}: "
+                        f"every hour is empty and the API reports missing channels "
+                        f"{response.missing_series}. The requested span is likely too long."
+                    )
+
+                if response.missing_series:
+                    _LOGGER.warning(
+                        "API reported missing channels %s for %s to %s",
+                        response.missing_series,
+                        chunk_start,
+                        chunk_end,
+                    )
+
+                series.extend(response.series)
+
+            if out_of_contract_chunks == len(chunks):
+                raise InvalidApiResponseException(
+                    f"no-relevant-contract for the whole range {start_date} to {end_date}"
+                )
+
+            if not series:
                 _LOGGER.warning("No data received from API for date range")
                 return
 
-            if response.missing_series:
-                _LOGGER.warning(
-                    "API reported %d missing hourly intervals in requested range",
-                    len(response.missing_series),
-                )
-
-            await self._write_statistics_chain(response.series, rebuild=True)
+            await self._write_statistics_chain(series, rebuild=True)
 
         except InvalidApiResponseException as err:
             # Check if this is a "no relevant contract" error
@@ -611,8 +702,7 @@ class HelenStatisticsManager:
 
             if response.missing_series:
                 _LOGGER.warning(
-                    "API reported %d missing hourly intervals",
-                    len(response.missing_series),
+                    "API reported missing channels %s", response.missing_series
                 )
 
             # Return hourly data directly (no aggregation needed)

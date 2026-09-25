@@ -41,11 +41,12 @@ uv run ruff check custom_components tests
 uv run ruff format custom_components tests
 
 # GitHub Actions runs:
+# - ruff check and ruff format --diff (the `lint` job)
 # - pytest with coverage
 # - hassfest validation (HA integration validator)
 # - HACS validation
 ```
-Ruff is not enforced in CI, so run it before committing.
+Both ruff commands are enforced in CI, so run them before pushing.
 
 ### Clean Build Artifacts
 ```bash

@@ -7,6 +7,28 @@ on:
     branches: [ main, dev ]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # ruff is pinned in pyproject.toml, so CI and local runs agree.
+      - name: Lint
+        run: uv run ruff check --output-format=github custom_components tests
+
+      # --diff rather than --check: the log then shows what to change.
+      - name: Check formatting
+        run: uv run ruff format --diff custom_components tests
+
   test:
     runs-on: ubuntu-latest
     strategy:

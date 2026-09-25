@@ -90,11 +90,11 @@ If you want to import historical consumption data beyond the automatic 72-hour b
 You can call actions from the UI in 'Developer Tools → Actions'. Look for `helen_energy.backfill_statistics`. Then select a `start_date` and a contract.
 
 **Service Parameters:**
-- `start_date` (required): The date to start backfilling from (format: YYYY-MM-DD)
+- `start_date` (optional): The date to start backfilling from (format: YYYY-MM-DD). Defaults to 30 days ago.
 - `config_entry_id` (optional): Target a specific Helen Energy entry. If omitted, backfills all configured contracts.
 
 **Limitations:**
-- Maximum backfill range: 365 days (1 year)
+- No maximum range. A `start_date` from before your contract began is fine — Helen returns data from the contract start onwards
 - Always backfills from start_date to today
 - Only the requested date range is rewritten; statistics outside that range (e.g., older history) are never touched
 - If your fixed unit price has changed, running backfill will reprice the entire requested range using the current price

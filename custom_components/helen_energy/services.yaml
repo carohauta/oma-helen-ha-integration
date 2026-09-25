@@ -5,13 +5,15 @@ backfill_statistics:
 
     - Rebuilds statistics from start_date to today, overwriting any existing data in that range
     - Data before start_date is never touched
+    - Leave the start date blank to backfill the last 30 days
+    - There is no maximum range; a start date before your contract began is fine, Helen returns data from the contract start onwards
     - Select a specific contract, or leave blank to backfill all contracts
     - Note: if your fixed unit price has changed, running this will reprice the entire requested range using the current price
   fields:
     start_date:
       name: Start date
-      description: First date to backfill (inclusive). Will backfill from this date to today.
-      required: true
+      description: First date to backfill (inclusive). Will backfill from this date to today. Defaults to 30 days ago.
+      required: false
       example: "2024-01-01"
       selector:
         date:

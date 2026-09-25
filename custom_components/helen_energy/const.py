@@ -22,5 +22,9 @@ CONTRACT_TYPE_EXCHANGE: Final = "exchange"
 # Statistics configuration
 STATISTICS_BACKFILL_HOURS: Final = 168  # 7 days; hours outside this window are permanently zero-filled
 
+# Backfill service: how far back to reach when the caller omits start_date.
+# Unrelated to STATISTICS_BACKFILL_HOURS, which is the automatic repair window.
+DEFAULT_BACKFILL_DAYS: Final = 30
+
 # Services
 SERVICE_BACKFILL_STATISTICS: Final = "backfill_statistics"

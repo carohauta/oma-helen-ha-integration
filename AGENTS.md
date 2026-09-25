@@ -48,6 +48,16 @@ uv run ruff format custom_components tests
 ```
 Both ruff commands are enforced in CI, so run them before pushing.
 
+To have them run on every commit instead, point git at the tracked hook once
+per clone:
+```bash
+git config core.hooksPath .githooks
+```
+`.githooks/pre-commit` runs the same two commands and blocks the commit if
+either fails. It only reports — fixing is the commands above — so it never
+re-stages files behind your back. `git commit --no-verify` skips it. It is a
+convenience, not the gate; CI is.
+
 ### Clean Build Artifacts
 ```bash
 rm -rf .pytest_cache htmlcov .coverage coverage.xml

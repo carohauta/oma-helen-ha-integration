@@ -1,0 +1,31 @@
+#!/bin/sh
+# Runs the same two ruff commands as the CI `lint` job, so a formatting slip
+# is caught here rather than in a red build. The verdict is identical to CI's
+# by construction: same commands, same scope, and ruff's version is pinned in
+# pyproject.toml.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Skip for one commit:     git commit --no-verify
+
+# Checks, never rewrites. A hook that reformatted files would have to re-stage
+# them, which silently commits more than was staged — a real hazard when only
+# some of a file's changes are staged on purpose.
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "pre-commit: uv not on PATH, skipping ruff checks" >&2
+    exit 0
+fi
+
+status=0
+
+if ! uv run ruff check custom_components tests; then
+    echo "pre-commit: fix with 'uv run ruff check --fix custom_components tests'" >&2
+    status=1
+fi
+
+if ! uv run ruff format --check custom_components tests; then
+    echo "pre-commit: fix with 'uv run ruff format custom_components tests'" >&2
+    status=1
+fi
+
+exit $status

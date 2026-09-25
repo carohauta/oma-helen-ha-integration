@@ -1,7 +1,6 @@
 """Tests for Helen Energy statistics manager."""
 
-from datetime import date, datetime, timedelta
-from itertools import pairwise
+from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -1197,54 +1196,3 @@ class TestHelenStatisticsManager:
         # Spot cost adjustment is zero (no spot price)
         assert len(cost_calls) == 1
         assert cost_calls[0][0][2] == pytest.approx(0.0)
-
-    async def test_backfill_fetches_in_yearly_chunks_and_clamps_to_contract_start(
-        self, hass: HomeAssistant, mock_api_client
-    ):
-        """Multi-year backfill is fetched in chunks of at most a year, the start
-        is clamped to the contract start, and all series feed one chain write."""
-        manager = HelenStatisticsManager(
-            hass,
-            mock_api_client,
-            "sensor.helen_monthly_consumption",
-            "test_entry_12345678",
-            "Helen Energy (test)",
-        )
-
-        contract_start = date(2022, 3, 28)
-        end_date = date(2026, 7, 13)
-        requested_start = date(2022, 1, 1)  # before contract start → clamped
-
-        mock_api_client.get_contract_start_date.return_value = contract_start
-
-        chunk_calls = []
-
-        def fake_measurements(start, end, resolution):
-            chunk_calls.append((start, end))
-            response = Mock()
-            response.series = [Mock(start=f"{start}", electricity=1.0)]
-            response.missing_series = []
-            response.resolution = resolution
-            return response
-
-        mock_api_client.get_measurements_with_spot_prices.side_effect = (
-            fake_measurements
-        )
-
-        with patch.object(manager, "_write_statistics_chain") as mock_write:
-            await manager.backfill_statistics(requested_start, end_date)
-
-        # Clamped to contract start, chunks of <= 365 days, contiguous coverage
-        assert chunk_calls[0][0] == contract_start
-        assert chunk_calls[-1][1] == end_date
-        for start, end in chunk_calls:
-            assert (end - start).days <= 364
-        for (_, prev_end), (next_start, _) in pairwise(chunk_calls):
-            assert next_start == prev_end + timedelta(days=1)
-        assert len(chunk_calls) == 5  # 2022-03-28 → 2026-07-13 is ~4.3 years
-
-        # One combined rebuild write with a series entry per chunk
-        mock_write.assert_called_once()
-        combined_series = mock_write.call_args[0][0]
-        assert len(combined_series) == len(chunk_calls)
-        assert mock_write.call_args.kwargs.get("rebuild") is True

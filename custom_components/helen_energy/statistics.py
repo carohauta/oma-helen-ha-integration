@@ -140,6 +140,9 @@ class HelenStatisticsManager:
             _LOGGER.warning("No interval data to process")
             return
 
+        # Fill missing spot prices from the dedicated spot prices endpoint.
+        await self.hass.async_add_executor_job(self._merge_spot_prices, series)
+
         now_utc = datetime.now(ZoneInfo("UTC")).replace(
             minute=0, second=0, microsecond=0
         )
@@ -236,6 +239,7 @@ class HelenStatisticsManager:
             repaired = await self._repair_zero_filled_hours(
                 api_entries,
                 existing_consumption,
+                existing_cost,
                 has_fixed_price,
             )
 
@@ -387,6 +391,7 @@ class HelenStatisticsManager:
         self,
         api_entries: dict[datetime, MeasurementsWithSpotPriceSeries],
         existing_consumption: dict[datetime, float],
+        existing_cost: dict[datetime, float],
         has_fixed_price: bool,
     ) -> RepairTotals:
         """Adjust previously zero-filled hours that now have real API data.
@@ -395,6 +400,9 @@ class HelenStatisticsManager:
         hour. When the API later delivers real data for that hour, we apply the
         delta via async_adjust_statistics so HA cascades it to all later records.
         Adjustments are applied earliest-first so each call is independent.
+
+        A second leg adjusts only the cost statistic for stored hours with real
+        consumption but zero cost, once the merged series carries their price.
 
         Returns the totals applied, so the caller can fold them into the walk's
         anchor — async_adjust_statistics cascades into the DB but the caller's
@@ -470,10 +478,59 @@ class HelenStatisticsManager:
                 electricity,
             )
 
+        # Cost-only leg: hours stored with real consumption but zero cost, whose
+        # price arrived later; the leg above and the extend walk never revisit them.
+        repaired_cost = 0
+        for prev_hour, curr_hour in zip(sorted_hours, sorted_hours[1:]):
+            if curr_hour != prev_hour + timedelta(hours=1):
+                continue
+
+            delta = existing_consumption[curr_hour] - existing_consumption[prev_hour]
+            if abs(delta) < SUM_EPSILON:
+                # Zero-filled consumption hour — owned by the leg above.
+                continue
+            cost_prev = existing_cost.get(prev_hour)
+            cost_curr = existing_cost.get(curr_hour)
+            if cost_prev is None or cost_curr is None:
+                continue
+            if abs(cost_curr - cost_prev) >= SUM_EPSILON:
+                continue
+
+            entry = api_entries.get(curr_hour)
+            if entry is None:
+                continue
+            electricity = self._extract_electricity_value(entry)
+            spot_price = self._extract_spot_price_value(entry)
+            if electricity is None or spot_price is None:
+                continue
+            hourly_cost = electricity * spot_price
+            # Below storage precision a repair would re-trigger on every run.
+            if abs(hourly_cost) < SUM_EPSILON:
+                continue
+
+            recorder.async_adjust_statistics(
+                self.cost_statistic_id, curr_hour, hourly_cost, "EUR"
+            )
+
+            repaired_cost += 1
+            total_cost += hourly_cost
+            _LOGGER.info(
+                "Repaired zero-cost hour %s for %s with late spot price: +%.2f EUR",
+                curr_hour.isoformat(),
+                self.entity_id,
+                hourly_cost,
+            )
+
         if repaired:
             _LOGGER.info(
                 "Repaired %d zero-filled hour(s) for %s",
                 repaired,
+                self.entity_id,
+            )
+        if repaired_cost:
+            _LOGGER.info(
+                "Repaired spot cost for %d hour(s) with late-arriving prices for %s",
+                repaired_cost,
                 self.entity_id,
             )
 
@@ -803,6 +860,69 @@ class HelenStatisticsManager:
             return None
 
         return entry.electricity_spot_prices_vat / 100.0
+
+    def _merge_spot_prices(self, series: list[MeasurementsWithSpotPriceSeries]) -> None:
+        """Fill missing spot prices from the dedicated spot prices endpoint.
+
+        Contracts like electricity-transfer sites never receive prices from the
+        measurements endpoint. Priced entries are left untouched; any failure
+        leaves the series unmodified.
+        """
+        missing = [
+            entry for entry in series if entry.electricity_spot_prices_vat is None
+        ]
+        if not missing:
+            return
+
+        helsinki = ZoneInfo("Europe/Helsinki")
+        days = sorted(
+            {
+                self._convert_to_utc(entry.start).astimezone(helsinki).date()
+                for entry in missing
+            }
+        )
+
+        # The hourly average repeats on each quarter entry; first wins.
+        hour_prices: dict[datetime, tuple[float, float | None]] = {}
+        for day in days:
+            try:
+                spot_series = self.api_client.get_spot_prices_from_chart_data(day).series
+            except Exception:
+                _LOGGER.warning(
+                    "Spot price chart data unavailable for %s; skipping merge for that day",
+                    day,
+                    exc_info=True,
+                )
+                continue
+            for spot in spot_series:
+                if spot.electricity_spot_prices_hour_average is None:
+                    continue
+                hour = self._convert_to_utc(spot.start).replace(
+                    minute=0, second=0, microsecond=0
+                )
+                if hour not in hour_prices:
+                    hour_prices[hour] = (
+                        spot.electricity_spot_prices_hour_average,
+                        spot.electricity_spot_prices_hour_average_vat,
+                    )
+
+        merged = 0
+        for entry in missing:
+            hour = self._convert_to_utc(entry.start).replace(
+                minute=0, second=0, microsecond=0
+            )
+            prices = hour_prices.get(hour)
+            if prices is None:
+                continue
+            entry.electricity_spot_prices = prices[0]
+            if prices[1] is not None:
+                entry.electricity_spot_prices_vat = prices[1]
+            merged += 1
+        _LOGGER.info(
+            "Merged spot prices from chart data into %d of %d measurement entries",
+            merged,
+            len(missing),
+        )
 
     async def _import_statistics(
         self,

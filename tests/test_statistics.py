@@ -9,7 +9,10 @@ import pytest
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 
-from custom_components.helen_energy.statistics import HelenStatisticsManager
+from custom_components.helen_energy.statistics import (
+    HelenStatisticsManager,
+    RepairTotals,
+)
 
 
 @pytest.fixture
@@ -18,6 +21,21 @@ def mock_api_client():
     mock_client = Mock()
     mock_client.close = Mock()
     return mock_client
+
+
+def _metadata_statistic_id(metadata):
+    """Read statistic_id from StatisticMetaData, which may be a dict or an object."""
+    return metadata["statistic_id"] if isinstance(metadata, dict) else metadata.statistic_id
+
+
+def _stats_for(mock_import, statistic_id):
+    """Return the StatisticData list imported for statistic_id."""
+    call = next(
+        c
+        for c in mock_import.call_args_list
+        if _metadata_statistic_id(c[0][1]) == statistic_id
+    )
+    return call[0][2]
 
 
 class TestHelenStatisticsManager:
@@ -344,23 +362,11 @@ class TestHelenStatisticsManager:
             await manager._write_statistics_chain(series)
 
         # Find the consumption import
-        cons_call = next(
-            c
-            for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
-            == manager.consumption_statistic_id
-        )
-        cons_stats = cons_call[0][2]
+        cons_stats = _stats_for(mock_import, manager.consumption_statistic_id)
         # Starts at 100 + 1.0 (first new hour), then +1.0 each
         assert [s["sum"] for s in cons_stats] == [101.0, 102.0, 103.0, 104.0]
 
-        cost_call = next(
-            c
-            for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
-            == manager.cost_statistic_id
-        )
-        cost_stats = cost_call[0][2]
+        cost_stats = _stats_for(mock_import, manager.cost_statistic_id)
         # Spot price = 1.0 EUR/kWh, electricity = 1.0 kWh -> +1.0 per hour from 50.0
         assert [s["sum"] for s in cost_stats] == [51.0, 52.0, 53.0, 54.0]
 
@@ -411,20 +417,16 @@ class TestHelenStatisticsManager:
             patch.object(
                 manager, "_get_existing_statistics_in_window", side_effect=fake_existing
             ),
-            patch.object(manager, "_repair_zero_filled_hours"),
+            patch.object(
+                manager, "_repair_zero_filled_hours", return_value=RepairTotals()
+            ),
             patch(
                 "custom_components.helen_energy.statistics.async_add_external_statistics"
             ) as mock_import,
         ):
             await manager._write_statistics_chain(series)
 
-        cons_call = next(
-            c
-            for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
-            == manager.consumption_statistic_id
-        )
-        cons_stats = cons_call[0][2]
+        cons_stats = _stats_for(mock_import, manager.consumption_statistic_id)
         # +1: 101, +2: zero-filled (101), +3: 103 — stops here, pending +4 not written
         assert [s["sum"] for s in cons_stats] == [101.0, 101.0, 103.0]
 
@@ -518,6 +520,160 @@ class TestHelenStatisticsManager:
             )
 
         mock_recorder.async_adjust_statistics.assert_not_called()
+
+    async def test_extend_anchors_from_repaired_sum_not_stale_snapshot(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """A repaired gap must not be lost when the walk resumes.
+
+        Regression test for a real-world bug: async_adjust_statistics cascades
+        repaired deltas into the DB's sum column, but the in-memory snapshot of
+        existing statistics queried just before the repair pass doesn't reflect
+        that. If the walk anchors off the stale snapshot, the newly written hour
+        drops back down by the full repaired amount — a negative spike.
+
+        Drives the real repair pass (only the recorder is mocked) so the anchor
+        is verified against the deltas actually adjusted, not a stubbed total.
+        """
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        utc = ZoneInfo("UTC")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        h0 = now_hour - timedelta(hours=3)  # predecessor establishing the flat pair
+        h1 = now_hour - timedelta(hours=2)  # zero-filled: sum unchanged from h0
+        h2 = now_hour - timedelta(hours=1)  # last DB hour
+        h3 = now_hour  # new hour written by this run's walk
+
+        # DB snapshot taken before the repair pass. h1 carries the same sum as h0,
+        # which is how a zero-filled hour looks; h2 then advanced by its own 1.0.
+        existing_consumption = {h0: 100.0, h1: 100.0, h2: 101.0}
+        existing_cost = {h0: 50.0, h1: 50.0, h2: 51.0}
+
+        async def fake_existing(statistic_id, start, end):
+            if statistic_id == manager.consumption_statistic_id:
+                return existing_consumption
+            if statistic_id == manager.cost_statistic_id:
+                return existing_cost
+            return {}
+
+        def make(t_utc, electricity, spot):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=electricity,
+                electricity_spot_prices_vat=spot,
+            )
+
+        # The API has now delivered real data for h1: 10 kWh @ 1.00 EUR/kWh.
+        series = [
+            make(h0, 1.0, 100.0),
+            make(h1, 10.0, 100.0),
+            make(h2, 1.0, 100.0),
+            make(h3, 1.0, 100.0),
+        ]
+
+        mock_recorder = Mock()
+        with (
+            patch.object(
+                manager, "_get_existing_statistics_in_window", side_effect=fake_existing
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.get_instance",
+                return_value=mock_recorder,
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._write_statistics_chain(series)
+
+        # The real repair pass must have identified h1 and adjusted it by +10 kWh.
+        adjust_calls = mock_recorder.async_adjust_statistics.call_args_list
+        consumption_adjusts = [
+            c for c in adjust_calls if c[0][0] == manager.consumption_statistic_id
+        ]
+        assert len(consumption_adjusts) == 1
+        assert consumption_adjusts[0][0][1] == h1
+        assert consumption_adjusts[0][0][2] == pytest.approx(10.0)
+
+        cons_stats = _stats_for(mock_import, manager.consumption_statistic_id)
+        # HA cascades that +10 into h2, so the true post-repair sum at h2 is 111.0.
+        # h3 adds its own 1.0 -> 112.0. Anchoring off the stale snapshot instead
+        # would give 101.0 + 1.0 = 102.0: a 10 kWh drop, the negative spike.
+        assert [s["sum"] for s in cons_stats] == [112.0]
+
+        # The cost chain must stay continuous through the same repair.
+        cost_stats = _stats_for(mock_import, manager.cost_statistic_id)
+        assert [s["sum"] for s in cost_stats] == [62.0]
+
+    async def test_cost_anchor_falls_back_to_earlier_record_not_zero(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """A cost series missing the anchor hour must not reset the chain to zero.
+
+        The anchor hour comes from the consumption series; the cost series is
+        queried separately and can lag by an hour. Falling back to 0.0 would emit
+        a negative cost spike far larger than any this module repairs.
+        """
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        helsinki_tz = ZoneInfo("Europe/Helsinki")
+        utc = ZoneInfo("UTC")
+        now_hour = datetime.now(utc).replace(minute=0, second=0, microsecond=0)
+        h1 = now_hour - timedelta(hours=2)
+        h2 = now_hour - timedelta(hours=1)  # last consumption hour; absent from cost
+        h3 = now_hour
+
+        async def fake_existing(statistic_id, start, end):
+            if statistic_id == manager.consumption_statistic_id:
+                return {h1: 100.0, h2: 101.0}
+            if statistic_id == manager.cost_statistic_id:
+                return {h1: 50.0}  # lags one hour behind consumption
+            return {}
+
+        def make(t_utc, electricity, spot):
+            t_hki = t_utc.astimezone(helsinki_tz)
+            return Mock(
+                start=t_hki.isoformat(),
+                stop=(t_hki + timedelta(hours=1)).isoformat(),
+                electricity=electricity,
+                electricity_spot_prices_vat=spot,
+            )
+
+        series = [make(h1, 1.0, 100.0), make(h2, 1.0, 100.0), make(h3, 2.0, 100.0)]
+
+        with (
+            patch.object(
+                manager, "_get_existing_statistics_in_window", side_effect=fake_existing
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.get_instance",
+                return_value=Mock(),
+            ),
+            patch(
+                "custom_components.helen_energy.statistics.async_add_external_statistics"
+            ) as mock_import,
+        ):
+            await manager._write_statistics_chain(series)
+
+        cost_stats = _stats_for(mock_import, manager.cost_statistic_id)
+        # Falls back to h1's 50.0, +2.0 for h3 = 52.0. A 0.0 fallback would
+        # write 2.0 instead, a 48 EUR negative spike.
+        assert [s["sum"] for s in cost_stats] == [52.0]
 
     async def test_fill_gaps_noop_when_db_already_caught_up(
         self, hass: HomeAssistant, mock_api_client
@@ -621,13 +777,7 @@ class TestHelenStatisticsManager:
         ):
             await manager._write_statistics_chain(series, rebuild=True)
 
-        cons_call = next(
-            c
-            for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
-            == manager.consumption_statistic_id
-        )
-        cons_stats = cons_call[0][2]
+        cons_stats = _stats_for(mock_import, manager.consumption_statistic_id)
         # Anchored at 500, 3 hours of 1.0 kWh each → 501, 502, 503
         assert [s["sum"] for s in cons_stats] == [501.0, 502.0, 503.0]
 
@@ -672,13 +822,7 @@ class TestHelenStatisticsManager:
         ):
             await manager._write_statistics_chain(series, rebuild=True)
 
-        cons_call = next(
-            c
-            for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
-            == manager.consumption_statistic_id
-        )
-        cons_stats = cons_call[0][2]
+        cons_stats = _stats_for(mock_import, manager.consumption_statistic_id)
         assert [s["sum"] for s in cons_stats] == [2.0, 4.0]
 
     async def test_missing_spot_price_does_not_zero_out_consumption(
@@ -783,7 +927,9 @@ class TestHelenStatisticsManager:
             patch.object(
                 manager, "_get_existing_statistics_in_window", side_effect=fake_existing
             ),
-            patch.object(manager, "_repair_zero_filled_hours"),
+            patch.object(
+                manager, "_repair_zero_filled_hours", return_value=RepairTotals()
+            ),
             patch(
                 "custom_components.helen_energy.statistics.async_add_external_statistics"
             ) as mock_import,

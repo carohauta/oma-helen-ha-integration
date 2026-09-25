@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from helenservice import RESOLUTION_HOUR, HelenApiClient
@@ -33,6 +34,19 @@ from .const import DOMAIN, STATISTICS_BACKFILL_HOURS
 from .utils import safe_round
 
 _LOGGER = logging.getLogger(__name__)
+
+# Cumulative sums are stored via safe_round (2 decimals), so any delta below half
+# of the last stored decimal is indistinguishable from an untouched cumulative.
+# Used both to detect zero-filled hours and to ignore repairs too small to store.
+SUM_EPSILON = 0.005
+
+
+class RepairTotals(NamedTuple):
+    """Totals applied by the repair pass, folded into the extend walk's anchor."""
+
+    consumption: float = 0.0
+    cost: float = 0.0
+    fixed_cost: float = 0.0
 
 
 class HelenStatisticsManager:
@@ -178,8 +192,8 @@ class HelenStatisticsManager:
             if anchor_consumption:
                 anchor_hour = max(anchor_consumption.keys())
                 cumulative_consumption = anchor_consumption[anchor_hour]
-                cumulative_cost = anchor_cost.get(anchor_hour, 0.0)
-                cumulative_fixed_cost = anchor_fixed_cost.get(anchor_hour, 0.0)
+                cumulative_cost = self._anchor_at(anchor_cost, anchor_hour)
+                cumulative_fixed_cost = self._anchor_at(anchor_fixed_cost, anchor_hour)
             else:
                 cumulative_consumption = 0.0
                 cumulative_cost = 0.0
@@ -195,22 +209,31 @@ class HelenStatisticsManager:
             )
         else:
             # Extend mode: query existing window, repair zero-filled hours, then extend.
+            # The window starts one hour early so the first API hour has a
+            # predecessor to compare against — the repair pass detects zero-fills
+            # from consecutive pairs, so without it that hour could never be
+            # repaired and would drop out of the window permanently.
+            window_start = earliest_api - timedelta(hours=1)
             window_end = now_utc + timedelta(hours=1)
             existing_consumption = await self._get_existing_statistics_in_window(
-                self.consumption_statistic_id, earliest_api, window_end
+                self.consumption_statistic_id, window_start, window_end
             )
             existing_cost = await self._get_existing_statistics_in_window(
-                self.cost_statistic_id, earliest_api, window_end
+                self.cost_statistic_id, window_start, window_end
             )
             existing_fixed_cost: dict[datetime, float] = {}
             if has_fixed_price and self.fixed_cost_statistic_id:
                 existing_fixed_cost = await self._get_existing_statistics_in_window(
-                    self.fixed_cost_statistic_id, earliest_api, window_end
+                    self.fixed_cost_statistic_id, window_start, window_end
                 )
 
             # Repair pass: fix previously zero-filled hours that now have real data.
             # A zero-filled hour shows as a zero delta (cumulative unchanged from prev hour).
-            await self._repair_zero_filled_hours(
+            # async_adjust_statistics cascades these deltas into every later DB record,
+            # including last_db_hour, so the anchor below must account for them too —
+            # otherwise the walk resumes from a stale, pre-repair sum and the cascaded
+            # correction is lost, producing a negative spike at walk_start.
+            repaired = await self._repair_zero_filled_hours(
                 api_entries,
                 existing_consumption,
                 has_fixed_price,
@@ -218,9 +241,16 @@ class HelenStatisticsManager:
 
             if existing_consumption:
                 last_db_hour = max(existing_consumption.keys())
-                cumulative_consumption = existing_consumption[last_db_hour]
-                cumulative_cost = existing_cost.get(last_db_hour, 0.0)
-                cumulative_fixed_cost = existing_fixed_cost.get(last_db_hour, 0.0)
+                cumulative_consumption = (
+                    existing_consumption[last_db_hour] + repaired.consumption
+                )
+                cumulative_cost = (
+                    self._anchor_at(existing_cost, last_db_hour) + repaired.cost
+                )
+                cumulative_fixed_cost = (
+                    self._anchor_at(existing_fixed_cost, last_db_hour)
+                    + repaired.fixed_cost
+                )
                 walk_start = last_db_hour + timedelta(hours=1)
             else:
                 cumulative_consumption = 0.0
@@ -358,20 +388,27 @@ class HelenStatisticsManager:
         api_entries: dict[datetime, MeasurementsWithSpotPriceSeries],
         existing_consumption: dict[datetime, float],
         has_fixed_price: bool,
-    ) -> None:
+    ) -> RepairTotals:
         """Adjust previously zero-filled hours that now have real API data.
 
         A zero-filled hour leaves the cumulative sum unchanged from the previous
         hour. When the API later delivers real data for that hour, we apply the
         delta via async_adjust_statistics so HA cascades it to all later records.
         Adjustments are applied earliest-first so each call is independent.
+
+        Returns the totals applied, so the caller can fold them into the walk's
+        anchor — async_adjust_statistics cascades into the DB but the caller's
+        in-memory snapshot of existing statistics predates these adjustments.
         """
         sorted_hours = sorted(existing_consumption.keys())
         if len(sorted_hours) < 2:
-            return
+            return RepairTotals()
 
         recorder = get_instance(self.hass)
         repaired = 0
+        total_consumption = 0.0
+        total_cost = 0.0
+        total_fixed_cost = 0.0
 
         for prev_hour, curr_hour in zip(sorted_hours, sorted_hours[1:]):
             # Skip non-consecutive pairs (shouldn't happen, but be safe)
@@ -379,7 +416,7 @@ class HelenStatisticsManager:
                 continue
 
             delta = existing_consumption[curr_hour] - existing_consumption[prev_hour]
-            if delta != 0.0:
+            if abs(delta) >= SUM_EPSILON:
                 continue
 
             # Cumulative didn't move — this hour was zero-filled.
@@ -391,15 +428,23 @@ class HelenStatisticsManager:
             spot_price = self._extract_spot_price_value(entry)
             # Repair as soon as real consumption arrives. A missing spot price
             # must not block the consumption fix — it just means 0.0 spot cost.
-            if electricity is None or electricity == 0.0:
+            if electricity is None:
+                continue
+            # Below storage precision an adjustment can't move the stored sum,
+            # so applying it would double-count the hour on every later run.
+            # Subsumes a plain 0.0 reading.
+            if abs(electricity) < SUM_EPSILON:
                 continue
             if spot_price is None:
                 spot_price = 0.0
 
             hourly_cost = electricity * spot_price
+            # Bound once so the accumulated total can't drift from what was
+            # actually adjusted — the anchor depends on the two agreeing.
+            adjust_fixed_cost = bool(has_fixed_price and self.fixed_cost_statistic_id)
             hourly_fixed_cost = (
                 electricity * (self._fixed_unit_price / 100.0)
-                if has_fixed_price
+                if adjust_fixed_cost
                 else 0.0
             )
 
@@ -409,12 +454,15 @@ class HelenStatisticsManager:
             recorder.async_adjust_statistics(
                 self.cost_statistic_id, curr_hour, hourly_cost, "EUR"
             )
-            if has_fixed_price and self.fixed_cost_statistic_id:
+            if adjust_fixed_cost:
                 recorder.async_adjust_statistics(
                     self.fixed_cost_statistic_id, curr_hour, hourly_fixed_cost, "EUR"
                 )
 
             repaired += 1
+            total_consumption += electricity
+            total_cost += hourly_cost
+            total_fixed_cost += hourly_fixed_cost
             _LOGGER.info(
                 "Repaired zero-filled hour %s for %s: +%.3f kWh",
                 curr_hour.isoformat(),
@@ -428,6 +476,8 @@ class HelenStatisticsManager:
                 repaired,
                 self.entity_id,
             )
+
+        return RepairTotals(total_consumption, total_cost, total_fixed_cost)
 
     # The API silently returns an empty series ("missing_series") for large
     # requests, so we fetch in yearly chunks instead.
@@ -654,6 +704,24 @@ class HelenStatisticsManager:
                 exc_info=True,
             )
             raise
+
+    @staticmethod
+    def _anchor_at(existing: dict[datetime, float], hour: datetime) -> float:
+        """Cumulative value to resume from at `hour`.
+
+        The anchor hour is chosen from the *consumption* series, but the cost
+        series is queried independently and may not have a record at that exact
+        hour. Falling back to 0.0 would reset the cumulative chain and emit a
+        negative spike far larger than any this module repairs, so fall back to
+        the most recent earlier record instead. 0.0 only when the series is
+        genuinely empty before `hour`, where starting from zero is correct.
+        """
+        if hour in existing:
+            return existing[hour]
+        earlier = [h for h in existing if h < hour]
+        if not earlier:
+            return 0.0
+        return existing[max(earlier)]
 
     async def _get_existing_statistics_in_window(
         self, statistic_id: str, start_time: datetime, end_time: datetime

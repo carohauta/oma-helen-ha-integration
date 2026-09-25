@@ -497,21 +497,9 @@ class HelenStatisticsManager:
             (end_date - start_date).days,
         )
 
-        contract_start = await self.hass.async_add_executor_job(
-            self.api_client.get_contract_start_date
-        )
-
-        # Only prevent fetch if BOTH dates are before contract start
-        if contract_start is not None and contract_start > end_date:
-            _LOGGER.warning(
-                "Backfill period (%s to %s) is entirely before contract start %s - no data available",
-                start_date,
-                end_date,
-                contract_start,
-            )
-            return
-
-        # API will handle partial overlap (contract started during the range)
+        # A start_date before the contract began is fine: the request is a
+        # partial overlap and Helen returns data from the contract start
+        # onwards. Never clamp to get_contract_start_date() — see ADR-0001.
 
         try:
             # Fetch hourly data from API
@@ -594,28 +582,9 @@ class HelenStatisticsManager:
         end_date = date.today()
         start_date = end_date - timedelta(days=STATISTICS_BACKFILL_HOURS // 24 + 1)
 
-        # Clamp to contract start so new users (<72h old contract) get partial data
-        # instead of a 403 for the pre-contract portion of the window
-        try:
-            contract_start = await self.hass.async_add_executor_job(
-                self.api_client.get_contract_start_date
-            )
-
-            # Only prevent fetch if BOTH dates are before contract start
-            if contract_start is not None and contract_start > end_date:
-                _LOGGER.debug(
-                    "Fetch window (%s to %s) is entirely before contract start %s - skipping",
-                    start_date,
-                    end_date,
-                    contract_start,
-                )
-                return
-
-            # API handles partial overlap
-        except Exception as err:
-            _LOGGER.debug(
-                "Could not get contract start date, using default window: %s", err
-            )
+        # A window reaching back before the contract began is fine: the request
+        # is a partial overlap and Helen returns data from the contract start
+        # onwards. Never clamp to get_contract_start_date() — see ADR-0001.
 
         _LOGGER.debug(
             "Fetching hourly interval data from %s to %s", start_date, end_date

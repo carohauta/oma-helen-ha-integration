@@ -1,6 +1,6 @@
 """Tests for Helen Energy statistics manager."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -1018,3 +1018,46 @@ class TestHelenStatisticsManager:
         assert len(cost_calls) == 1
         assert cost_calls[0][0][1] == h2
         assert cost_calls[0][0][2] == pytest.approx(0.0)
+
+    async def test_backfill_does_not_clamp_start_to_contract_start(
+        self, hass: HomeAssistant, mock_api_client
+    ):
+        """A start_date before the contract start must reach the API unchanged.
+
+        get_contract_start_date() reports the *newest active* contract's start,
+        which for a renewed contract is the renewal date — clamping to it
+        discards history Helen would return. The request is a partial overlap
+        and the API serves it from the contract start onwards. See ADR-0001.
+        """
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
+
+        # Renewal shape: customer since 2020, contract renewed 2024.
+        mock_api_client.get_contract_start_date.return_value = date(2024, 8, 1)
+        requested_start = date(2020, 11, 5)
+        end_date = date.today()
+
+        response = Mock()
+        response.series = [Mock(start=f"{requested_start}", electricity=1.0)]
+        response.missing_series = []
+        response.resolution = "hour"
+        mock_api_client.get_measurements_with_spot_prices.return_value = response
+
+        with patch.object(manager, "_write_statistics_chain") as mock_write:
+            await manager.backfill_statistics(requested_start, end_date)
+
+        # One request for the full requested range, unclamped and unchunked
+        assert mock_api_client.get_measurements_with_spot_prices.call_count == 1
+        call_start, call_end = (
+            mock_api_client.get_measurements_with_spot_prices.call_args[0][:2]
+        )
+        assert call_start == requested_start
+        assert call_end == end_date
+
+        mock_write.assert_called_once()
+        assert mock_write.call_args.kwargs.get("rebuild") is True

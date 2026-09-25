@@ -47,6 +47,37 @@ class TestHelenDataCoordinator:
         assert coordinator.name == "Helen Energy"
         assert coordinator.config_entry is mock_config_entry
 
+    async def test_transfer_fee_falls_back_to_unit_price(
+        self, hass: HomeAssistant, mock_config_entry, mock_api_setup
+    ):
+        """Transfer-only contracts use their per-kWh transfer fee as unit price."""
+        mock_api_client, _ = mock_api_setup
+        mock_api_client.get_contract_type.return_value = None
+        mock_api_client.get_contract_energy_unit_price.return_value = 0.0
+        mock_api_client.get_transfer_fee.return_value = 7.35788
+
+        await _setup_entry(hass, mock_config_entry)
+
+        coordinator = hass.data[DOMAIN][mock_config_entry.entry_id]["coordinator"]
+        assert coordinator.data["unit_price"] == 7.35788
+        assert coordinator.statistics_manager._fixed_unit_price == 7.35788
+        mock_api_client.get_transfer_fee.assert_called()
+
+    async def test_energy_contract_with_zero_price_skips_transfer_fee_fallback(
+        self, hass: HomeAssistant, mock_config_entry, mock_api_setup
+    ):
+        """Energy contracts reporting 0.0 must not pick up the transfer fee as unit price."""
+        mock_api_client, _ = mock_api_setup
+        mock_api_client.get_contract_type.return_value = "PERUS"
+        mock_api_client.get_contract_energy_unit_price.return_value = 0.0
+        mock_api_client.get_transfer_fee.return_value = 7.35788
+
+        await _setup_entry(hass, mock_config_entry)
+
+        coordinator = hass.data[DOMAIN][mock_config_entry.entry_id]["coordinator"]
+        assert coordinator.data["unit_price"] == 0.0
+        mock_api_client.get_transfer_fee.assert_not_called()
+
     async def test_coordinator_network_error_preserves_data(
         self, hass: HomeAssistant, mock_config_entry, mock_api_setup
     ):

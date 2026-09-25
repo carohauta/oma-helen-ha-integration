@@ -1043,7 +1043,7 @@ class TestHelenStatisticsManager:
         end_date = date.today()
 
         response = Mock()
-        response.series = [Mock(start=f"{requested_start}", electricity=1.0)]
+        response.series = [Mock(start=str(requested_start), electricity=1.0)]
         response.missing_series = []
         response.resolution = "hour"
         mock_api_client.get_measurements_with_spot_prices.return_value = response

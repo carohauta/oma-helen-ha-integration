@@ -72,7 +72,7 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 
 **`services.py`** - Integration services
 - Registers `helen_energy.backfill_statistics` (schema/UI in `services.yaml`)
-- Backfills a custom date range (`start_date` → today, max `MAX_BACKFILL_DAYS=365`); optional `config_entry_id` targets one contract, otherwise all
+- Backfills a custom date range (`start_date` → today, no maximum; `start_date` defaults to `DEFAULT_BACKFILL_DAYS=30` ago — see ADR-0001); optional `config_entry_id` targets one contract, otherwise all
 - Fetches the requested range first; only writes to the DB on success — a failed API call leaves existing statistics untouched
 - Uses rebuild mode: anchors on the last DB record before the range, overwrites the range via upsert; data outside the range is never touched
 - Delegates per-coordinator to `HelenStatisticsManager.backfill_statistics()`

@@ -35,7 +35,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             "start_date", end_date - timedelta(days=DEFAULT_BACKFILL_DAYS)
         )
 
-        # Validation
         if start_date > end_date:
             raise ServiceValidationError("start_date cannot be in the future")
 

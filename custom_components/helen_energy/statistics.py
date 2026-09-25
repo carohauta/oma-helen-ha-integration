@@ -134,7 +134,9 @@ class HelenStatisticsManager:
 
         In both modes only a missing ``electricity`` value zero-fills an hour; a
         missing spot price alone still writes the real kWh with a 0.0 EUR
-        spot-cost contribution (e.g. electricity-transfer sites).
+        spot-cost contribution. Transfer contracts are the permanent case of
+        this — Helen never prices them at spot — so their cost is carried by the
+        fixed-cost stream from the transfer fee instead. See ADR-0002.
         """
         if not series:
             _LOGGER.warning("No interval data to process")

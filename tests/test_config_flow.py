@@ -113,9 +113,7 @@ class TestHelenConfigFlow:
 class TestHelenSiteSelector:
     """Test the GSRN delivery-site selection step."""
 
-    async def test_multi_site_shows_selector(
-        self, hass: HomeAssistant, mock_api_setup
-    ):
+    async def test_multi_site_shows_selector(self, hass: HomeAssistant, mock_api_setup):
         """Accounts with more than one GSRN get a selection step."""
         mock_api, mock_price = _mock_config_flow_clients(
             ["637000000000000001", "637000000000000002"]

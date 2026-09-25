@@ -108,9 +108,7 @@ async def async_setup_entry(
     include_transfer_costs = conf(config_entry, CONF_INCLUDE_TRANSFER_COSTS)
 
     # Get user's explicit contract type choice
-    user_contract_type = conf(
-        config_entry, CONF_CONTRACT_TYPE, CONTRACT_TYPE_AUTOMATIC
-    )
+    user_contract_type = conf(config_entry, CONF_CONTRACT_TYPE, CONTRACT_TYPE_AUTOMATIC)
 
     entities = []
 
@@ -201,9 +199,15 @@ class HelenBaseSensor(CoordinatorEntity, SensorEntity):
         last = data.get("last_month_consumption")
         daily = data.get("daily_average_consumption")
         return {
-            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: safe_round(current) if current is not None else None,
-            STATE_ATTR_LAST_MONTH_CONSUMPTION: safe_round(last) if last is not None else None,
-            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: safe_round(daily) if daily is not None else None,
+            STATE_ATTR_CURRENT_MONTH_CONSUMPTION: safe_round(current)
+            if current is not None
+            else None,
+            STATE_ATTR_LAST_MONTH_CONSUMPTION: safe_round(last)
+            if last is not None
+            else None,
+            STATE_ATTR_DAILY_AVERAGE_CONSUMPTION: safe_round(daily)
+            if daily is not None
+            else None,
             STATE_ATTR_CONSUMPTION_UNIT_OF_MEASUREMENT: "kWh",
         }
 

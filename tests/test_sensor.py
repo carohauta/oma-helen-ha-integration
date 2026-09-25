@@ -115,19 +115,19 @@ class TestHelenDataCoordinator:
 
         mock_api_client, _ = mock_api_setup
         mock_api_client.get_contract_start_date.return_value = date.today()
-        
+
         # Simulate API 403 error for last month (no relevant contract)
         def side_effect_for_last_month(*args, **kwargs):
             # If it's calling for last month, raise the 403 error
             from dateutil.relativedelta import relativedelta
             from helenservice.utils import get_month_date_range_by_date
-            
+
             today_last_month = date.today() + relativedelta(months=-1)
             start_date, _ = get_month_date_range_by_date(today_last_month)
-            
+
             if args[0] == start_date:
                 raise InvalidApiResponseException(
-                    'Helen chart-data request failed with status 403: '
+                    "Helen chart-data request failed with status 403: "
                     '{"type":"/problems/chart-data/no-relevant-contract",'
                     '"title":"No relevant contracts for delivery site in requested period",'
                     '"status":403}'
@@ -222,9 +222,7 @@ class TestHelenFixedPriceElectricity:
 class TestHelenMarketPriceElectricity:
     """Test HelenMarketPriceElectricity sensor via full integration setup."""
 
-    async def test_market_price_sensor_state(
-        self, hass: HomeAssistant, mock_api_setup
-    ):
+    async def test_market_price_sensor_state(self, hass: HomeAssistant, mock_api_setup):
         """Sensor state is estimated current-month cost using market prices."""
         entry = MockConfigEntry(
             domain=DOMAIN,
@@ -279,9 +277,7 @@ class TestHelenMarketPriceElectricity:
 class TestHelenExchangeElectricity:
     """Test HelenExchangeElectricity sensor via full integration setup."""
 
-    async def test_exchange_sensor_state(
-        self, hass: HomeAssistant, mock_api_setup
-    ):
+    async def test_exchange_sensor_state(self, hass: HomeAssistant, mock_api_setup):
         """Sensor state is spot-price costs + base_price for current month."""
         entry = MockConfigEntry(
             domain=DOMAIN,
@@ -309,8 +305,8 @@ class TestHelenExchangeElectricity:
         from helenservice.api_exceptions import InvalidApiResponseException
 
         mock_helen_api_client, _ = mock_api_setup
-        mock_helen_api_client.calculate_total_costs_by_spot_prices_between_dates.side_effect = (
-            InvalidApiResponseException("no data")
+        mock_helen_api_client.calculate_total_costs_by_spot_prices_between_dates.side_effect = InvalidApiResponseException(
+            "no data"
         )
 
         entry = MockConfigEntry(
@@ -457,9 +453,7 @@ class TestAutomaticContractDetection:
 class TestHelenMarketPriceElectricityNoneHandling:
     """The market price API can return None fields; the sensor must not crash."""
 
-    async def test_handles_none_price_fields(
-        self, hass: HomeAssistant, mock_api_setup
-    ):
+    async def test_handles_none_price_fields(self, hass: HomeAssistant, mock_api_setup):
         """All price fields None → state is just the base price, no crash."""
         _, mock_price_client = mock_api_setup
         mock_price_client.get_market_price_prices.return_value.last_month = None

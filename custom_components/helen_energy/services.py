@@ -3,37 +3,43 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN, SERVICE_BACKFILL_STATISTICS
+from .const import DEFAULT_BACKFILL_DAYS, DOMAIN, SERVICE_BACKFILL_STATISTICS
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_BACKFILL_SCHEMA = vol.Schema(
     {
-        vol.Required("start_date"): cv.date,
+        vol.Optional("start_date"): cv.date,
         vol.Optional("config_entry_id"): cv.string,
     }
 )
+
 
 async def async_setup_services(hass: HomeAssistant) -> None:
     """Set up services for Helen Energy integration."""
 
     async def handle_backfill_statistics(call: ServiceCall) -> None:
         """Handle backfill statistics service call."""
-        start_date: date = call.data["start_date"]
         end_date: date = date.today()  # Always backfill to today
+        # No start_date: reach back DEFAULT_BACKFILL_DAYS. There is no upper
+        # bound — a start_date before the contract began is a partial overlap
+        # the API serves from the contract start onwards. See ADR-0001.
+        start_date: date = call.data.get(
+            "start_date", end_date - timedelta(days=DEFAULT_BACKFILL_DAYS)
+        )
 
-        # Validation
         if start_date > end_date:
             raise ServiceValidationError("start_date cannot be in the future")
 
         date_range = (end_date - start_date).days
+
         config_entry_id: str | None = call.data.get("config_entry_id")
         contract_msg = (
             f" for config entry {config_entry_id}"

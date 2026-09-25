@@ -125,7 +125,9 @@ def mock_coordinator_data():
 
 
 @pytest.fixture
-async def mock_api_setup(enable_custom_integrations, mock_helen_api_client, mock_helen_price_client):
+async def mock_api_setup(
+    enable_custom_integrations, mock_helen_api_client, mock_helen_price_client
+):
     """Patch HelenApiClient and HelenPriceClient so async_setup_entry doesn't make real HTTP calls.
 
     Depends on enable_custom_integrations (which needs hass) so must be async.

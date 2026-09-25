@@ -20,7 +20,8 @@ CONTRACT_TYPE_MARKET: Final = "market"
 CONTRACT_TYPE_EXCHANGE: Final = "exchange"
 
 # Statistics configuration
-STATISTICS_BACKFILL_HOURS: Final = 168  # 7 days; hours outside this window are permanently zero-filled
+# 7 days; hours outside this window are permanently zero-filled
+STATISTICS_BACKFILL_HOURS: Final = 168
 
 # Backfill service: how far back to reach when the caller omits start_date.
 # Unrelated to STATISTICS_BACKFILL_HOURS, which is the automatic repair window.

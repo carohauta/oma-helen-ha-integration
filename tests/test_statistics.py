@@ -27,7 +27,11 @@ def mock_api_client():
 
 def _metadata_statistic_id(metadata):
     """Read statistic_id from StatisticMetaData, which may be a dict or an object."""
-    return metadata["statistic_id"] if isinstance(metadata, dict) else metadata.statistic_id
+    return (
+        metadata["statistic_id"]
+        if isinstance(metadata, dict)
+        else metadata.statistic_id
+    )
 
 
 def _stats_for(mock_import, statistic_id):
@@ -58,13 +62,20 @@ class TestHelenStatisticsManager:
         assert manager.entity_id == "sensor.helen_monthly_consumption"
         assert manager.config_entry_title == "Helen Energy (test)"
         assert (
-            manager.consumption_statistic_id == "helen_energy:hourly_energy_consumption_test_ent"
+            manager.consumption_statistic_id
+            == "helen_energy:hourly_energy_consumption_test_ent"
         )
         assert manager.cost_statistic_id == "helen_energy:hourly_cost_spot_test_ent"
 
     def test_convert_to_utc(self, hass: HomeAssistant, mock_api_client):
         """Test timezone conversion from Helsinki to UTC."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.test",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
 
         # Test winter time (UTC+2)
         helsinki_winter = "2024-01-15T12:00:00+02:00"
@@ -80,7 +91,13 @@ class TestHelenStatisticsManager:
 
     def test_extract_electricity_value(self, hass: HomeAssistant, mock_api_client):
         """Test extracting electricity value from measurement entry."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.test",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
 
         # Test with electricity value present
         entry = Mock(electricity=5.5)
@@ -92,7 +109,13 @@ class TestHelenStatisticsManager:
 
     def test_extract_spot_price_value(self, hass: HomeAssistant, mock_api_client):
         """Test extracting spot price value from measurement entry."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.test",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
 
         # Test with spot price value present (in cents)
         entry = Mock(electricity_spot_prices_vat=500.0)  # 500 cents = 5.00 EUR
@@ -102,11 +125,15 @@ class TestHelenStatisticsManager:
         entry = Mock(electricity_spot_prices_vat=None)
         assert manager._extract_spot_price_value(entry) is None
 
-    async def test_fetch_interval_data(
-        self, hass: HomeAssistant, mock_api_client
-    ):
+    async def test_fetch_interval_data(self, hass: HomeAssistant, mock_api_client):
         """Test fetching hourly interval data from API."""
-        manager = HelenStatisticsManager(hass, mock_api_client, "sensor.test", "test_entry_12345678", "Helen Energy (test)")
+        manager = HelenStatisticsManager(
+            hass,
+            mock_api_client,
+            "sensor.test",
+            "test_entry_12345678",
+            "Helen Energy (test)",
+        )
 
         # Create mock hourly response (not quarters)
         mock_hourly_response = Mock()
@@ -152,7 +179,11 @@ class TestHelenStatisticsManager:
     ):
         """Test getting existing statistics in a time window."""
         manager = HelenStatisticsManager(
-            hass, mock_api_client, "sensor.helen_monthly_consumption", "test_entry_12345678", "Helen Energy (test)"
+            hass,
+            mock_api_client,
+            "sensor.helen_monthly_consumption",
+            "test_entry_12345678",
+            "Helen Energy (test)",
         )
 
         start_time = datetime(2024, 5, 15, 0, 0, 0, tzinfo=ZoneInfo("UTC"))
@@ -291,7 +322,11 @@ class TestHelenStatisticsManager:
         def stream(statistic_id):
             for call in mock_import.call_args_list:
                 meta = call[0][1]
-                sid = meta["statistic_id"] if isinstance(meta, dict) else meta.statistic_id
+                sid = (
+                    meta["statistic_id"]
+                    if isinstance(meta, dict)
+                    else meta.statistic_id
+                )
                 if sid == statistic_id:
                     return meta, call[0][2]
             raise AssertionError(f"No import for {statistic_id}")
@@ -403,8 +438,12 @@ class TestHelenStatisticsManager:
             make(last_db_hour_utc + timedelta(hours=1), 1.0, 100.0),
             make(last_db_hour_utc + timedelta(hours=3), 2.0, 100.0),
             Mock(
-                start=(last_db_hour_utc + timedelta(hours=4)).astimezone(helsinki_tz).isoformat(),
-                stop=(last_db_hour_utc + timedelta(hours=5)).astimezone(helsinki_tz).isoformat(),
+                start=(last_db_hour_utc + timedelta(hours=4))
+                .astimezone(helsinki_tz)
+                .isoformat(),
+                stop=(last_db_hour_utc + timedelta(hours=5))
+                .astimezone(helsinki_tz)
+                .isoformat(),
                 electricity=None,
                 electricity_spot_prices_vat=None,
             ),
@@ -481,7 +520,9 @@ class TestHelenStatisticsManager:
 
         # Should have adjusted consumption and cost for h2
         adjust_calls = mock_recorder.async_adjust_statistics.call_args_list
-        consumption_calls = [c for c in adjust_calls if c[0][0] == manager.consumption_statistic_id]
+        consumption_calls = [
+            c for c in adjust_calls if c[0][0] == manager.consumption_statistic_id
+        ]
         cost_calls = [c for c in adjust_calls if c[0][0] == manager.cost_statistic_id]
 
         assert len(consumption_calls) == 1
@@ -517,9 +558,7 @@ class TestHelenStatisticsManager:
             return_value=mock_recorder,
         ):
             # API still has nothing for h2
-            await manager._repair_zero_filled_hours(
-                {}, existing_consumption, False
-            )
+            await manager._repair_zero_filled_hours({}, existing_consumption, False)
 
         mock_recorder.async_adjust_statistics.assert_not_called()
 
@@ -869,7 +908,11 @@ class TestHelenStatisticsManager:
         def stream(statistic_id):
             for call in mock_import.call_args_list:
                 meta = call[0][1]
-                sid = meta["statistic_id"] if isinstance(meta, dict) else meta.statistic_id
+                sid = (
+                    meta["statistic_id"]
+                    if isinstance(meta, dict)
+                    else meta.statistic_id
+                )
                 if sid == statistic_id:
                     return call[0][2]
             raise AssertionError(f"No import for {statistic_id}")
@@ -941,7 +984,11 @@ class TestHelenStatisticsManager:
         cons_call = next(
             c
             for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            if (
+                c[0][1]["statistic_id"]
+                if isinstance(c[0][1], dict)
+                else c[0][1].statistic_id
+            )
             == manager.consumption_statistic_id
         )
         cons_stats = cons_call[0][2]
@@ -953,7 +1000,11 @@ class TestHelenStatisticsManager:
         cost_call = next(
             c
             for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            if (
+                c[0][1]["statistic_id"]
+                if isinstance(c[0][1], dict)
+                else c[0][1].statistic_id
+            )
             == manager.cost_statistic_id
         )
         cost_stats = cost_call[0][2]
@@ -1289,7 +1340,11 @@ class TestHelenStatisticsManager:
         cons_call = next(
             c
             for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            if (
+                c[0][1]["statistic_id"]
+                if isinstance(c[0][1], dict)
+                else c[0][1].statistic_id
+            )
             == manager.consumption_statistic_id
         )
         cons_stats = cons_call[0][2]
@@ -1299,7 +1354,11 @@ class TestHelenStatisticsManager:
         spot_call = next(
             c
             for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            if (
+                c[0][1]["statistic_id"]
+                if isinstance(c[0][1], dict)
+                else c[0][1].statistic_id
+            )
             == manager.cost_statistic_id
         )
         spot_stats = spot_call[0][2]
@@ -1353,7 +1412,11 @@ class TestHelenStatisticsManager:
         fixed_call = next(
             c
             for c in mock_import.call_args_list
-            if (c[0][1]["statistic_id"] if isinstance(c[0][1], dict) else c[0][1].statistic_id)
+            if (
+                c[0][1]["statistic_id"]
+                if isinstance(c[0][1], dict)
+                else c[0][1].statistic_id
+            )
             == manager.fixed_cost_statistic_id
         )
         fixed_stats = fixed_call[0][2]
@@ -1411,7 +1474,9 @@ class TestHelenStatisticsManager:
             )
 
         adjust_calls = mock_recorder.async_adjust_statistics.call_args_list
-        consumption_calls = [c for c in adjust_calls if c[0][0] == manager.consumption_statistic_id]
+        consumption_calls = [
+            c for c in adjust_calls if c[0][0] == manager.consumption_statistic_id
+        ]
         cost_calls = [c for c in adjust_calls if c[0][0] == manager.cost_statistic_id]
 
         assert len(consumption_calls) == 1

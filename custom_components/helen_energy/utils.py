@@ -50,7 +50,11 @@ def resolve_contract_type(
         CONTRACT_TYPE_MARKET,
     )
 
-    if user_choice in (CONTRACT_TYPE_FIXED, CONTRACT_TYPE_MARKET, CONTRACT_TYPE_EXCHANGE):
+    if user_choice in (
+        CONTRACT_TYPE_FIXED,
+        CONTRACT_TYPE_MARKET,
+        CONTRACT_TYPE_EXCHANGE,
+    ):
         return user_choice
     if api_contract_type:
         if "PERUS" in api_contract_type or "KAYTTO" in api_contract_type:

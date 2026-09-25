@@ -171,9 +171,7 @@ class TestConfigSchema:
 class TestEntryMigration:
     """Test config entry version migration on setup."""
 
-    async def test_v1_entry_migrates_to_v2(
-        self, hass: HomeAssistant, mock_api_setup
-    ):
+    async def test_v1_entry_migrates_to_v2(self, hass: HomeAssistant, mock_api_setup):
         """A version-1 entry is migrated to version 2 during setup.
 
         Guards against the inverted version gate that previously skipped

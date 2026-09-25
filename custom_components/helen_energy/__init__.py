@@ -18,7 +18,12 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import HelenDataCoordinator
-from .migration import async_migrate_entities_for_compatibility, async_migrate_entry
+from .migration import (
+    async_migrate_entities_for_compatibility,
+    # Re-exported, not called here: HA looks async_migrate_entry up on the
+    # integration's top-level module.
+    async_migrate_entry as async_migrate_entry,
+)
 from .services import async_setup_services, async_unload_services
 from .utils import conf
 

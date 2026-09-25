@@ -36,11 +36,16 @@ uv run pytest tests/ -v --pdb
 
 ### Linting & Validation
 ```bash
+# Lint and format (ruff is pinned in pyproject.toml; line length 88)
+uv run ruff check custom_components tests
+uv run ruff format custom_components tests
+
 # GitHub Actions runs:
 # - pytest with coverage
 # - hassfest validation (HA integration validator)
 # - HACS validation
 ```
+Ruff is not enforced in CI, so run it before committing.
 
 ### Clean Build Artifacts
 ```bash

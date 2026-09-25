@@ -50,9 +50,7 @@ class TestResolveContractType:
         assert (
             resolve_contract_type(CONTRACT_TYPE_AUTOMATIC, None) == CONTRACT_TYPE_FIXED
         )
-        assert (
-            resolve_contract_type(CONTRACT_TYPE_AUTOMATIC, "") == CONTRACT_TYPE_FIXED
-        )
+        assert resolve_contract_type(CONTRACT_TYPE_AUTOMATIC, "") == CONTRACT_TYPE_FIXED
 
     def test_none_user_choice_derives_from_api(self):
         """Missing user choice (legacy entries) behaves like automatic."""

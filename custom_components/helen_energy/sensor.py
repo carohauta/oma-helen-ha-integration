@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -78,6 +80,28 @@ def _assign_identity(
         delivery_site = coordinator.config_entry.data.get(CONF_DELIVERY_SITE_ID)
         suffix = f"Site {delivery_site}" if delivery_site else str(index + 1)
         entity._attr_name = f"Helen {sensor_type.replace('_', ' ').title()} ({suffix})"
+
+
+def _find_active_forecast_period(
+    forecast: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return the forecast entry covering the current UTC timestamp."""
+    if not forecast:
+        return None
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    for entry in forecast:
+        start_raw = entry.get("start")
+        stop_raw = entry.get("stop")
+        if not start_raw or not stop_raw:
+            continue
+        try:
+            start_dt = datetime.fromisoformat(start_raw).astimezone(ZoneInfo("UTC"))
+            stop_dt = datetime.fromisoformat(stop_raw).astimezone(ZoneInfo("UTC"))
+            if start_dt <= now_utc < stop_dt:
+                return entry
+        except ValueError:
+            continue
+    return forecast[0]
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
@@ -160,7 +184,7 @@ async def async_setup_entry(
 
     entities.append(HelenMonthlyConsumption(coordinator))
 
-    if coordinator.data.get("rented_solar"):
+    if coordinator.data.get("has_rented_solar") or coordinator.data.get("rented_solar"):
         entities.append(HelenRentedSolarMonthly(coordinator))
         entities.append(HelenRentedSolarDaily(coordinator))
 
@@ -444,9 +468,12 @@ class HelenSmartElectricity(HelenBaseSensor):
         if current_month_consumption is None:
             return None
 
-        unit_price = self._get_unit_price(data)
         smart_data = data.get("smart_electricity") or {}
-        impact = smart_data.get("current_month_impact") or 0.0
+        impact = smart_data.get("current_month_impact")
+        if impact is None:
+            return None
+
+        unit_price = self._get_unit_price(data)
         effective_price = unit_price + impact
 
         return safe_round(
@@ -536,11 +563,12 @@ class HelenConsumptionRecommendation(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        """Return current consumption recommendation state."""
+        """Return current consumption recommendation state for the active period."""
         if self.coordinator.data is None:
             return None
         smart_data = self.coordinator.data.get("smart_electricity") or {}
-        return smart_data.get("recommendation")
+        active = _find_active_forecast_period(smart_data.get("forecast", []))
+        return active.get("impact") if active else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -548,10 +576,12 @@ class HelenConsumptionRecommendation(CoordinatorEntity, SensorEntity):
         if self.coordinator.data is None:
             return {}
         smart_data = self.coordinator.data.get("smart_electricity") or {}
+        forecast = smart_data.get("forecast", [])
+        active = _find_active_forecast_period(forecast) or {}
         return {
-            "header": smart_data.get("header"),
-            "info": smart_data.get("info"),
-            "forecast": smart_data.get("forecast", []),
+            "header": active.get("header"),
+            "info": active.get("info"),
+            "forecast": forecast,
         }
 
 
@@ -612,8 +642,8 @@ class HelenRentedSolarMonthly(CoordinatorEntity, SensorEntity):
         """Return current month production in kWh."""
         if self.coordinator.data is None:
             return None
-        solar = self.coordinator.data.get("rented_solar") or {}
-        return solar.get("month_kwh")
+        solar = self.coordinator.data.get("rented_solar")
+        return solar.get("month_kwh") if solar else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -645,5 +675,5 @@ class HelenRentedSolarDaily(CoordinatorEntity, SensorEntity):
         """Return latest completed day production in kWh."""
         if self.coordinator.data is None:
             return None
-        solar = self.coordinator.data.get("rented_solar") or {}
-        return solar.get("latest_day_kwh")
+        solar = self.coordinator.data.get("rented_solar")
+        return solar.get("latest_day_kwh") if solar else None

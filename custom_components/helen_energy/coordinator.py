@@ -20,6 +20,7 @@ from .const import (
     CONF_CONTRACT_START_DATE,
     CONF_CONTRACT_TYPE,
     CONF_DEFAULT_UNIT_PRICE,
+    CONF_VAT,
     CONTRACT_TYPE_EXCHANGE,
     CONTRACT_TYPE_MARKET,
     CONTRACT_TYPE_SMART,
@@ -121,6 +122,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         self.delivery_site_id = delivery_site_id
         self.include_transfer_costs = include_transfer_costs
         self.contract_type = conf(config_entry, CONF_CONTRACT_TYPE)
+        self.vat = float(conf(config_entry, CONF_VAT, 25.5))
 
         is_first_entry, entry_index = get_entry_position(hass, config_entry)
         if is_first_entry:
@@ -297,15 +299,17 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             # Smart electricity (Välkky / Valtti) usage impact & recommendations
             if effective_contract_type == CONTRACT_TYPE_SMART:
                 data["smart_electricity"] = await _fetch_smart_electricity_data(
-                    self.hass, self.api_client
+                    self.hass, self.api_client, self.vat
                 )
             else:
                 data["smart_electricity"] = None
 
-            # Rented solar panel (Nimikkopaneeli) production if present on account
-            data["rented_solar"] = await _fetch_rented_solar_data(
+            # Rented solar panel (Nimikkopaneeli) contract & production
+            solar_contract, solar_data = await _fetch_rented_solar_data(
                 self.hass, self.api_client
             )
+            data["has_rented_solar"] = solar_contract is not None
+            data["rented_solar"] = solar_data
 
             if self.data is not None:
                 for key in (
@@ -315,6 +319,10 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 ):
                     if data.get(key) is None and self.data.get(key) is not None:
                         data[key] = self.data[key]
+                if not data["has_rented_solar"] and self.data.get("has_rented_solar"):
+                    data["has_rented_solar"] = True
+                if data["rented_solar"] is None and self.data.get("rented_solar"):
+                    data["rented_solar"] = self.data["rented_solar"]
 
         except InvalidApiResponseException as err:
             if "authentication" in str(err).lower():
@@ -350,7 +358,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
 
 
 async def _fetch_smart_electricity_data(
-    hass: HomeAssistant, helen_api_client: HelenApiClient
+    hass: HomeAssistant, helen_api_client: HelenApiClient, vat_percent: float
 ) -> dict[str, Any]:
     """Fetch usage impact and consumption status recommendations for smart contracts."""
     today = date.today()
@@ -405,31 +413,24 @@ async def _fetch_smart_electricity_data(
     except Exception as err:
         _LOGGER.debug("Failed to fetch electricity status indicator: %s", err)
 
-    current_status = None
-    current_header = None
-    current_info = None
+    vat_multiplier = 1.0 + (vat_percent / 100.0)
     forecast: list[dict[str, Any]] = []
 
-    if periods:
-        current_val = periods[0].get("value", {})
-        current_status = _classify_consumption_impact(current_val)
-        current_header = current_val.get("header", {}).get("fi")
-        current_info = current_val.get("info", {}).get("fi")
-
-        for p in periods:
-            pval = p.get("value", {})
-            spot_no_vat = pval.get("value")
-            forecast.append(
-                {
-                    "start": p.get("start"),
-                    "stop": p.get("stop"),
-                    "impact": _classify_consumption_impact(pval),
-                    "header": pval.get("header", {}).get("fi"),
-                    "spot_price_vat": safe_round(spot_no_vat * 1.255, 2)
-                    if spot_no_vat is not None
-                    else None,
-                }
-            )
+    for p in periods:
+        pval = p.get("value", {})
+        spot_no_vat = pval.get("value")
+        forecast.append(
+            {
+                "start": p.get("start"),
+                "stop": p.get("stop"),
+                "impact": _classify_consumption_impact(pval),
+                "header": pval.get("header", {}).get("fi"),
+                "info": pval.get("info", {}).get("fi"),
+                "spot_price_vat": safe_round(spot_no_vat * vat_multiplier, 2)
+                if spot_no_vat is not None
+                else None,
+            }
+        )
 
     return {
         "current_month_impact": safe_round(current_impact, 2)
@@ -438,24 +439,28 @@ async def _fetch_smart_electricity_data(
         "last_month_impact": safe_round(last_impact, 2)
         if last_impact is not None
         else None,
-        "recommendation": current_status,
-        "header": current_header,
-        "info": current_info,
         "forecast": forecast,
     }
 
 
 async def _fetch_rented_solar_data(
     hass: HomeAssistant, helen_api_client: HelenApiClient
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Detect active rented solar panels and fetch monthly/daily production."""
+    try:
+        contracts = (
+            await hass.async_add_executor_job(helen_api_client.get_contract_data_json)
+            or []
+        )
+    except Exception as err:
+        _LOGGER.debug("Failed to fetch contract JSON for rented solar: %s", err)
+        return None, None
 
-    def _fetch_sync() -> dict[str, Any] | None:
-        contracts = helen_api_client.get_contract_data_json() or []
-        solar_contract = _extract_active_rented_solar_contract(contracts)
-        if not solar_contract or not solar_contract.get("plant_id"):
-            return None
+    solar_contract = _extract_active_rented_solar_contract(contracts)
+    if not solar_contract or not solar_contract.get("plant_id"):
+        return None, None
 
+    def _fetch_measurements() -> dict[str, Any] | None:
         plant_id = solar_contract["plant_id"]
         panel_amount = solar_contract["panel_amount"]
         token = helen_api_client.get_api_access_token()
@@ -466,6 +471,7 @@ async def _fetch_rented_solar_data(
 
         fi_tz = ZoneInfo("Europe/Helsinki")
         now = datetime.now(fi_tz)
+        today_date = now.date()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow_start = today_start + timedelta(days=1)
         month_start = today_start.replace(day=1)
@@ -485,17 +491,31 @@ async def _fetch_rented_solar_data(
             resp.json().get("intervals", {}).get("rented_production_one_panel", [])
         )
 
-        daily_kwh: list[float] = []
-        if intervals:
-            for m in intervals[0].get("measurements", []):
-                if m.get("value") is not None and m.get("status") == "valid":
-                    daily_kwh.append(round(float(m["value"]) * panel_amount, 3))
+        if not intervals:
+            return None
 
-        month_kwh = round(sum(daily_kwh), 3) if daily_kwh else 0.0
+        interval_start_raw = intervals[0].get("start")
+        interval_start = (
+            datetime.fromisoformat(interval_start_raw).astimezone(fi_tz).date()
+            if interval_start_raw
+            else month_start.date()
+        )
+
+        dated_kwh: list[tuple[date, float]] = []
+        for idx, m in enumerate(intervals[0].get("measurements", [])):
+            if m.get("value") is not None and m.get("status") == "valid":
+                m_date = interval_start + timedelta(days=idx)
+                dated_kwh.append(
+                    (m_date, round(float(m["value"]) * panel_amount, 3))
+                )
+
+        if not dated_kwh:
+            return None
+
+        month_kwh = round(sum(val for _, val in dated_kwh), 3)
+        completed_days = [(d, val) for d, val in dated_kwh if d < today_date]
         latest_day_kwh = (
-            daily_kwh[-2]
-            if len(daily_kwh) >= 2
-            else (daily_kwh[-1] if daily_kwh else 0.0)
+            completed_days[-1][1] if completed_days else dated_kwh[-1][1]
         )
 
         return {
@@ -505,14 +525,15 @@ async def _fetch_rented_solar_data(
             "panel_amount": panel_amount,
             "month_kwh": month_kwh,
             "latest_day_kwh": latest_day_kwh,
-            "daily_kwh": daily_kwh,
+            "daily_kwh": [val for _, val in dated_kwh],
         }
 
     try:
-        return await hass.async_add_executor_job(_fetch_sync)
+        solar_data = await hass.async_add_executor_job(_fetch_measurements)
+        return solar_contract, solar_data
     except Exception as err:
-        _LOGGER.debug("Failed to fetch rented solar panel data: %s", err)
-        return None
+        _LOGGER.debug("Failed to fetch rented solar panel measurements: %s", err)
+        return solar_contract, None
 
 
 async def _login_helen_api_if_needed(

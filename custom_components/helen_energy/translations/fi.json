@@ -73,13 +73,14 @@
       }
     }
   },
-  "selector": {
+ "selector": {
     "contract_type": {
       "options": {
         "automatic": "Automaattinen",
         "fixed": "Kiinteähintainen",
         "market": "Markkinahinta-sähkö",
-        "exchange": "Pörssisähkö"
+        "exchange": "Pörssisähkö",
+        "smart": "Kulutusvaikutussähkö (Välkky / Valtti)"
       }
     }
   }

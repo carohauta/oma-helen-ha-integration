@@ -29,6 +29,7 @@ from .const import (
     CONTRACT_TYPE_EXCHANGE,
     CONTRACT_TYPE_FIXED,
     CONTRACT_TYPE_MARKET,
+    CONTRACT_TYPE_SMART,
     DOMAIN,
 )
 from .utils import conf
@@ -53,6 +54,7 @@ def _contract_type_selector() -> selector.SelectSelector:
                 selector.SelectOptionDict(
                     value=CONTRACT_TYPE_EXCHANGE, label="exchange"
                 ),
+                selector.SelectOptionDict(value=CONTRACT_TYPE_SMART, label="smart"),
             ],
             mode="list",
             translation_key="contract_type",
@@ -178,20 +180,17 @@ class HelenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.api_client.get_contract_type
             )
 
-            # If contract type is None, we cannot automatically detect it
-            if api_contract_type is None:
-                return False, None
-
             # Map API contract type to our constants
+            if any(x in api_contract_type for x in ["VALKKY", "VALTTI"]):
+                return True, CONTRACT_TYPE_SMART
             if any(x in api_contract_type for x in ["PERUS", "KAYTTO"]):
                 return True, CONTRACT_TYPE_FIXED
-            elif "MARK" in api_contract_type:
+            if "MARK" in api_contract_type:
                 return True, CONTRACT_TYPE_MARKET
-            elif any(x in api_contract_type for x in ["PORS"]):
+            if any(x in api_contract_type for x in ["PORS"]):
                 return True, CONTRACT_TYPE_EXCHANGE
-            else:
-                # Unsupported contract type - return raw API type for error message
-                return False, api_contract_type
+            # Unsupported contract type - return raw API type for error message
+            return False, api_contract_type
         except Exception as ex:
             _LOGGER.warning("Could not validate contract type: %s", ex)
             return False, None

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
-from typing import TYPE_CHECKING
+from datetime import date, datetime, timedelta
+from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
+import requests
 from dateutil.relativedelta import relativedelta
 from helenservice.api_client import HelenApiClient
 from helenservice.api_exceptions import InvalidApiResponseException
@@ -20,6 +22,8 @@ from .const import (
     CONF_DEFAULT_UNIT_PRICE,
     CONTRACT_TYPE_EXCHANGE,
     CONTRACT_TYPE_MARKET,
+    CONTRACT_TYPE_SMART,
+    OMA_HELEN_API_V28_BASE,
 )
 from .statistics import HelenStatisticsManager
 from .utils import conf, get_entry_position, resolve_contract_type, safe_round
@@ -31,6 +35,63 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=3)
+
+
+def _classify_consumption_impact(period_value: dict[str, Any]) -> str:
+    """Classify consumption recommendation into Lowering / Neutral / Raising."""
+    raw_text = " ".join(
+        str(v)
+        for v in (
+            period_value.get("level"),
+            period_value.get("status"),
+            period_value.get("type"),
+            period_value.get("header", {}).get("fi"),
+            period_value.get("info", {}).get("fi"),
+            period_value.get("extra_info", {}).get("fi"),
+        )
+        if v is not None
+    ).lower()
+
+    if any(
+        word in raw_text
+        for word in ("vähennä", "kalliim", "nostava", "high", "red", "expensive")
+    ):
+        return "Raising"
+    if any(
+        word in raw_text
+        for word in (
+            "keskitä",
+            "halvem",
+            "alentava",
+            "low",
+            "green",
+            "cheap",
+            "normaalisti",
+        )
+    ):
+        return "Lowering"
+    return "Neutral"
+
+
+def _extract_active_rented_solar_contract(
+    contracts: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Find an active rented-production (Nimikkopaneeli) contract from contract JSON."""
+    now_iso = datetime.now(ZoneInfo("UTC")).isoformat()
+    for contract in contracts:
+        end_date = contract.get("end_date") or contract.get("contract_end_date")
+        if end_date and str(end_date) < now_iso[:19]:
+            continue
+        for product in contract.get("products", []):
+            if product.get("product_type") == "rented-production":
+                attrs = product.get("attributes") or {}
+                return {
+                    "plant_id": product.get("id"),
+                    "name": product.get("name"),
+                    "panel_amount": int(attrs.get("panel_amount", 1)),
+                    "location": attrs.get("location"),
+                }
+    return None
 
 
 class HelenDataCoordinator(DataUpdateCoordinator):
@@ -61,16 +122,12 @@ class HelenDataCoordinator(DataUpdateCoordinator):
         self.include_transfer_costs = include_transfer_costs
         self.contract_type = conf(config_entry, CONF_CONTRACT_TYPE)
 
-        # Initialize statistics manager
-        # Generate entity_id for monthly consumption sensor
-        # For the first entry, use the standard entity ID
         is_first_entry, entry_index = get_entry_position(hass, config_entry)
         if is_first_entry:
             entity_id = "sensor.helen_monthly_consumption"
         else:
             entity_id = f"sensor.helen_monthly_consumption_{entry_index + 1}"
 
-        # Get user-configured fixed unit price (if any)
         config_fixed_unit_price = conf(config_entry, CONF_DEFAULT_UNIT_PRICE)
 
         self.statistics_manager = HelenStatisticsManager(
@@ -81,13 +138,6 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             config_entry.title,
             fixed_unit_price=config_fixed_unit_price,
         )
-        _LOGGER.debug(
-            "Statistics manager initialized for %s (fixed_price=%s)",
-            entity_id,
-            f"{config_fixed_unit_price} cents/kWh"
-            if config_fixed_unit_price
-            else "from API",
-        )
 
     async def _async_update_data(self):
         """Fetch data from Helen API."""
@@ -97,24 +147,17 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             )
             _select_delivery_site(self.api_client, self.delivery_site_id)
 
-            # Get all the data we need
             _LOGGER.debug("Starting data fetch from Helen API")
+            data: dict[str, Any] = {}
 
-            data = {}
-
-            _LOGGER.debug("Fetching current month consumption")
             data[
                 "current_month_consumption"
             ] = await _get_total_consumption_for_current_month(
                 self.hass, self.api_client
             )
-
-            _LOGGER.debug("Fetching last month consumption")
             data[
                 "last_month_consumption"
             ] = await _get_total_consumption_for_last_month(self.hass, self.api_client)
-
-            _LOGGER.debug("Fetching daily average consumption")
             data[
                 "daily_average_consumption"
             ] = await _get_average_daily_consumption_for_current_month(
@@ -122,7 +165,6 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             )
 
             if self.include_transfer_costs:
-                _LOGGER.debug("Fetching transfer costs")
                 data[
                     "transfer_costs"
                 ] = await _get_transfer_price_total_for_current_month(
@@ -131,18 +173,13 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             else:
                 data["transfer_costs"] = 0.0
 
-            _LOGGER.debug("Fetching contract base price")
             data["contract_base_price"] = await self.hass.async_add_executor_job(
                 self.api_client.get_contract_base_price
             )
-
-            _LOGGER.debug("Fetching contract type")
             data["contract_type"] = await self.hass.async_add_executor_job(
                 self.api_client.get_contract_type
             )
 
-            # Detect contract changes
-            _LOGGER.debug("Fetching contract start date")
             current_contract_start = await self.hass.async_add_executor_job(
                 self.api_client.get_contract_start_date
             )
@@ -153,7 +190,6 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 )
 
                 if stored_contract_start is None:
-                    # First run - store contract start silently
                     _LOGGER.info(
                         "Initial contract start date: %s", current_contract_start
                     )
@@ -165,9 +201,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                         self.config_entry, data=new_data
                     )
                 else:
-                    # Parse stored date and check for renewal
                     stored_date = date.fromisoformat(stored_contract_start)
-
                     if (
                         current_contract_start != stored_date
                         and current_contract_start > stored_date
@@ -177,7 +211,6 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                             stored_date,
                             current_contract_start,
                         )
-                        # Update stored contract start
                         new_data = dict(self.config_entry.data)
                         new_data[CONF_CONTRACT_START_DATE] = (
                             current_contract_start.isoformat()
@@ -186,12 +219,9 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                             self.config_entry, data=new_data
                         )
 
-                # Store in data dict for debugging
                 data["contract_start_date"] = current_contract_start
 
-            # Get prices based on contract type
             try:
-                _LOGGER.debug("Fetching unit price")
                 unit_price = await self.hass.async_add_executor_job(
                     self.api_client.get_contract_energy_unit_price
                 )
@@ -199,9 +229,6 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Failed to get unit price: %s", e)
                 unit_price = None
 
-            # Transfer-only contracts have no energy product, so the API
-            # returns 0.0 for the unit price and None for the contract type.
-            # Fall back to their transfer fee.
             if not unit_price and data.get("contract_type") is None:
                 try:
                     unit_price = await self.hass.async_add_executor_job(
@@ -212,13 +239,11 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                     unit_price = None
             data["unit_price"] = unit_price
 
-            # Resolve the effective contract type now that we have the API code.
-            # Handles the "automatic" user choice and any unrecognised codes.
             effective_contract_type = resolve_contract_type(
                 self.contract_type, data.get("contract_type")
             )
 
-            # Get market prices only for market contracts
+            # Market prices
             if effective_contract_type == CONTRACT_TYPE_MARKET:
                 try:
                     prices = await self.hass.async_add_executor_job(
@@ -238,7 +263,7 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             else:
                 data["market_prices"] = None
 
-            # Calculate spot price costs only for exchange electricity contracts
+            # Exchange costs
             if effective_contract_type == CONTRACT_TYPE_EXCHANGE:
                 try:
                     current_month = date.today()
@@ -249,18 +274,13 @@ class HelenDataCoordinator(DataUpdateCoordinator):
                         *get_month_date_range_by_date(current_month),
                     )
 
-                    # Try to fetch last month cost, but handle new contracts gracefully
                     try:
                         last_month_cost = await self.hass.async_add_executor_job(
                             self.api_client.calculate_total_costs_by_spot_prices_between_dates,
                             *get_month_date_range_by_date(last_month),
                         )
                     except InvalidApiResponseException as err:
-                        # New contracts: no data exists before contract start
                         if "no-relevant-contract" in str(err).lower():
-                            _LOGGER.debug(
-                                "No contract data for last month exchange costs - likely a new contract"
-                            )
                             last_month_cost = 0.0
                         else:
                             raise
@@ -274,9 +294,19 @@ class HelenDataCoordinator(DataUpdateCoordinator):
             else:
                 data["exchange_costs"] = None
 
-            # Retain last known values for consumption fields if the API returned
-            # empty series (partial failure) — avoids showing "unknown" on a
-            # transient gap in the measurements endpoint.
+            # Smart electricity (Välkky / Valtti) usage impact & recommendations
+            if effective_contract_type == CONTRACT_TYPE_SMART:
+                data["smart_electricity"] = await _fetch_smart_electricity_data(
+                    self.hass, self.api_client
+                )
+            else:
+                data["smart_electricity"] = None
+
+            # Rented solar panel (Nimikkopaneeli) production if present on account
+            data["rented_solar"] = await _fetch_rented_solar_data(
+                self.hass, self.api_client
+            )
+
             if self.data is not None:
                 for key in (
                     "current_month_consumption",
@@ -288,47 +318,201 @@ class HelenDataCoordinator(DataUpdateCoordinator):
 
         except InvalidApiResponseException as err:
             if "authentication" in str(err).lower():
-                # Trigger reauth if it's an auth error
                 raise ConfigEntryAuthFailed from err
-            # For network/API errors, log the error but keep the last known data
             _LOGGER.warning(
                 "Error communicating with Helen API, keeping last known values: %s", err
             )
-            # Return the existing data if available, otherwise return empty dict
             return self.data if self.data is not None else {}
         except Exception as err:
-            # For unexpected errors, log but don't fail the update
             _LOGGER.error(
                 "Unexpected error fetching Helen data, keeping last known values: %s",
                 err,
+                exc_info=True,
             )
-            _LOGGER.error("Exception traceback:", exc_info=True)
-            # Return the existing data if available, otherwise return empty dict
             return self.data if self.data is not None else {}
         else:
-            # Import statistics after successful data fetch
             if self.statistics_manager:
-                # Update fixed unit price from API if not configured by user
-                # Priority: 1. User config, 2. API contract price
                 if conf(self.config_entry, CONF_DEFAULT_UNIT_PRICE) is None:
-                    # Use API price if available (only for fixed-price contracts)
                     self.statistics_manager.set_fixed_unit_price(data.get("unit_price"))
 
                 try:
                     await self.statistics_manager.import_recent_statistics()
-                    _LOGGER.debug("Successfully imported energy statistics")
                 except InvalidApiResponseException as err:
-                    # Follow existing error pattern - log warning but don't fail
                     _LOGGER.warning("Statistics import API error: %s", err)
                 except Exception as err:
                     _LOGGER.error(
                         "Unexpected error importing statistics: %s", err, exc_info=True
                     )
-                    # Don't fail coordinator update
 
             return data
         finally:
             self.api_client.close()
+
+
+async def _fetch_smart_electricity_data(
+    hass: HomeAssistant, helen_api_client: HelenApiClient
+) -> dict[str, Any]:
+    """Fetch usage impact and consumption status recommendations for smart contracts."""
+    today = date.today()
+    last_month = today + relativedelta(months=-1)
+    curr_start, curr_end = get_month_date_range_by_date(today)
+    curr_end = min(curr_end, today)
+    last_start, last_end = get_month_date_range_by_date(last_month)
+
+    def _calc_impact(start_d: date, end_d: date) -> float | None:
+        for method_name in (
+            "calculate_impact_of_usage_between_dates",
+            "calculate_the_impact_of_usage_between_dates",
+        ):
+            fn = getattr(helen_api_client, method_name, None)
+            if callable(fn):
+                return fn(start_d, end_d)
+        return None
+
+    current_impact = None
+    last_impact = None
+    try:
+        current_impact = await hass.async_add_executor_job(
+            _calc_impact, curr_start, curr_end
+        )
+    except Exception as err:
+        _LOGGER.warning("Failed to calculate current month usage impact: %s", err)
+
+    try:
+        last_impact = await hass.async_add_executor_job(
+            _calc_impact, last_start, last_end
+        )
+    except Exception as err:
+        _LOGGER.warning("Failed to calculate last month usage impact: %s", err)
+
+    def _get_status_periods() -> list[dict[str, Any]]:
+        token = helen_api_client.get_api_access_token()
+        resp = requests.get(
+            f"{OMA_HELEN_API_V28_BASE}/electricity-status-indicator/today",
+            params={"hours": 24},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        return resp.json() or []
+
+    periods: list[dict[str, Any]] = []
+    try:
+        periods = await hass.async_add_executor_job(_get_status_periods)
+    except Exception as err:
+        _LOGGER.debug("Failed to fetch electricity status indicator: %s", err)
+
+    current_status = None
+    current_header = None
+    current_info = None
+    forecast: list[dict[str, Any]] = []
+
+    if periods:
+        current_val = periods[0].get("value", {})
+        current_status = _classify_consumption_impact(current_val)
+        current_header = current_val.get("header", {}).get("fi")
+        current_info = current_val.get("info", {}).get("fi")
+
+        for p in periods:
+            pval = p.get("value", {})
+            spot_no_vat = pval.get("value")
+            forecast.append(
+                {
+                    "start": p.get("start"),
+                    "stop": p.get("stop"),
+                    "impact": _classify_consumption_impact(pval),
+                    "header": pval.get("header", {}).get("fi"),
+                    "spot_price_vat": safe_round(spot_no_vat * 1.255, 2)
+                    if spot_no_vat is not None
+                    else None,
+                }
+            )
+
+    return {
+        "current_month_impact": safe_round(current_impact, 2)
+        if current_impact is not None
+        else None,
+        "last_month_impact": safe_round(last_impact, 2)
+        if last_impact is not None
+        else None,
+        "recommendation": current_status,
+        "header": current_header,
+        "info": current_info,
+        "forecast": forecast,
+    }
+
+
+async def _fetch_rented_solar_data(
+    hass: HomeAssistant, helen_api_client: HelenApiClient
+) -> dict[str, Any] | None:
+    """Detect active rented solar panels and fetch monthly/daily production."""
+
+    def _fetch_sync() -> dict[str, Any] | None:
+        contracts = helen_api_client.get_contract_data_json() or []
+        solar_contract = _extract_active_rented_solar_contract(contracts)
+        if not solar_contract or not solar_contract.get("plant_id"):
+            return None
+
+        plant_id = solar_contract["plant_id"]
+        panel_amount = solar_contract["panel_amount"]
+        token = helen_api_client.get_api_access_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        }
+
+        fi_tz = ZoneInfo("Europe/Helsinki")
+        now = datetime.now(fi_tz)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start = today_start + timedelta(days=1)
+        month_start = today_start.replace(day=1)
+
+        resp = requests.get(
+            f"{OMA_HELEN_API_V28_BASE}/measurements/{plant_id}/one-share",
+            params={
+                "begin": month_start.astimezone(ZoneInfo("UTC")).isoformat(),
+                "end": tomorrow_start.astimezone(ZoneInfo("UTC")).isoformat(),
+                "resolution": "day",
+            },
+            headers=headers,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        intervals = (
+            resp.json().get("intervals", {}).get("rented_production_one_panel", [])
+        )
+
+        daily_kwh: list[float] = []
+        if intervals:
+            for m in intervals[0].get("measurements", []):
+                if m.get("value") is not None and m.get("status") == "valid":
+                    daily_kwh.append(round(float(m["value"]) * panel_amount, 3))
+
+        month_kwh = round(sum(daily_kwh), 3) if daily_kwh else 0.0
+        latest_day_kwh = (
+            daily_kwh[-2]
+            if len(daily_kwh) >= 2
+            else (daily_kwh[-1] if daily_kwh else 0.0)
+        )
+
+        return {
+            "plant_id": plant_id,
+            "name": solar_contract.get("name"),
+            "location": solar_contract.get("location"),
+            "panel_amount": panel_amount,
+            "month_kwh": month_kwh,
+            "latest_day_kwh": latest_day_kwh,
+            "daily_kwh": daily_kwh,
+        }
+
+    try:
+        return await hass.async_add_executor_job(_fetch_sync)
+    except Exception as err:
+        _LOGGER.debug("Failed to fetch rented solar panel data: %s", err)
+        return None
 
 
 async def _login_helen_api_if_needed(
@@ -373,11 +557,7 @@ async def _get_total_consumption_between_dates(
 async def _get_total_consumption_for_last_month(
     hass: HomeAssistant, helen_api_client: HelenApiClient
 ) -> float:
-    """Get total consumption for last month.
-
-    For renewals, the API returns historical data from previous contracts.
-    For new contracts, the API throws 403 if requesting dates before contract start.
-    """
+    """Get total consumption for last month."""
     today_last_month = date.today() + relativedelta(months=-1)
     start_date, end_date = get_month_date_range_by_date(today_last_month)
 
@@ -386,16 +566,8 @@ async def _get_total_consumption_for_last_month(
             hass, helen_api_client, start_date, end_date
         )
     except InvalidApiResponseException as err:
-        # New contracts: no data exists before contract start
-        # Error: "No relevant contracts for delivery site in requested period"
         if "no-relevant-contract" in str(err).lower():
-            _LOGGER.debug(
-                "No contract data available for last month (%s to %s) - likely a new contract",
-                start_date,
-                end_date,
-            )
             return 0.0
-        # Other API errors: re-raise
         raise
 
 

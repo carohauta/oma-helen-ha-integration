@@ -79,7 +79,8 @@
         "automatic": "Automatic (detect from API)",
         "fixed": "Fixed price",
         "market": "Market price",
-        "exchange": "Exchange price"
+        "exchange": "Exchange price",
+        "smart": "Smart electricity (Välkky / Valtti)"
       }
     }
   }

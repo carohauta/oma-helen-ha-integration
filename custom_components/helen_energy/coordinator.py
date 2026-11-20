@@ -40,15 +40,18 @@ SCAN_INTERVAL = timedelta(hours=3)
 
 def _classify_consumption_impact(period_value: dict[str, Any]) -> str:
     """Classify consumption recommendation into Lowering / Neutral / Raising."""
+    header = period_value.get("header") or {}
+    info = period_value.get("info") or {}
+    extra_info = period_value.get("extra_info") or {}
     raw_text = " ".join(
         str(v)
         for v in (
             period_value.get("level"),
             period_value.get("status"),
             period_value.get("type"),
-            period_value.get("header", {}).get("fi"),
-            period_value.get("info", {}).get("fi"),
-            period_value.get("extra_info", {}).get("fi"),
+            header.get("fi") if isinstance(header, dict) else header,
+            info.get("fi") if isinstance(info, dict) else info,
+            extra_info.get("fi") if isinstance(extra_info, dict) else extra_info,
         )
         if v is not None
     ).lower()
@@ -417,15 +420,19 @@ async def _fetch_smart_electricity_data(
     forecast: list[dict[str, Any]] = []
 
     for p in periods:
-        pval = p.get("value", {})
+        pval = p.get("value") or {}
         spot_no_vat = pval.get("value")
+        header_obj = pval.get("header") or {}
+        info_obj = pval.get("info") or {}
         forecast.append(
             {
                 "start": p.get("start"),
                 "stop": p.get("stop"),
                 "impact": _classify_consumption_impact(pval),
-                "header": pval.get("header", {}).get("fi"),
-                "info": pval.get("info", {}).get("fi"),
+                "header": header_obj.get("fi")
+                if isinstance(header_obj, dict)
+                else header_obj,
+                "info": info_obj.get("fi") if isinstance(info_obj, dict) else info_obj,
                 "spot_price_vat": safe_round(spot_no_vat * vat_multiplier, 2)
                 if spot_no_vat is not None
                 else None,

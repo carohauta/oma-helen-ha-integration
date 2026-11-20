@@ -18,6 +18,10 @@ CONTRACT_TYPE_AUTOMATIC: Final = "automatic"
 CONTRACT_TYPE_FIXED: Final = "fixed"
 CONTRACT_TYPE_MARKET: Final = "market"
 CONTRACT_TYPE_EXCHANGE: Final = "exchange"
+CONTRACT_TYPE_SMART: Final = "smart"
+
+# Oma Helen v28 endpoints not yet wrapped by helenservice
+OMA_HELEN_API_V28_BASE: Final = "https://api.oma.helen.fi/v28"
 
 # Statistics configuration
 # 7 days; hours outside this window are permanently zero-filled

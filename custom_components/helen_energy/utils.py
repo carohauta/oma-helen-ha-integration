@@ -40,23 +40,27 @@ def resolve_contract_type(
 ) -> str:
     """Resolve the effective contract type from the user's choice and API contract code.
 
-    The user can pick a concrete type (fixed/market/exchange) or "automatic", in which
-    case the type is derived from the Helen API contract code. Falls back to fixed when
-    the API code is missing or unrecognized.
+    The user can pick a concrete type (fixed/market/exchange/smart) or "automatic", in
+    which case the type is derived from the Helen API contract code. Falls back to fixed
+    when the API code is missing or unrecognized.
     """
     from .const import (
         CONTRACT_TYPE_EXCHANGE,
         CONTRACT_TYPE_FIXED,
         CONTRACT_TYPE_MARKET,
+        CONTRACT_TYPE_SMART,
     )
 
     if user_choice in (
         CONTRACT_TYPE_FIXED,
         CONTRACT_TYPE_MARKET,
         CONTRACT_TYPE_EXCHANGE,
+        CONTRACT_TYPE_SMART,
     ):
         return user_choice
     if api_contract_type:
+        if "VALKKY" in api_contract_type or "VALTTI" in api_contract_type:
+            return CONTRACT_TYPE_SMART
         if "PERUS" in api_contract_type or "KAYTTO" in api_contract_type:
             return CONTRACT_TYPE_FIXED
         if "MARK" in api_contract_type:
